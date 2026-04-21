@@ -1,4 +1,4 @@
-// Watches ~/.claude/onlooker/logs/*.jsonl using chokidar.
+// Watches ~/.claude/onlooker/core/logs/*.jsonl using chokidar.
 //
 // The key insight is "tail" behaviour: we track a byte cursor per file so
 // that when chokidar fires a "change" event we only read the bytes appended

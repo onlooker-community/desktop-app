@@ -11,7 +11,7 @@ A split-pane Electron application:
 - **Weekly Review**: Modal with session history, scores, and Counsel synthesis
 - **Settings**: OS keychain API key storage, model selection, Tribunal threshold, plugin config
 
-The app tails `~/.claude/onlooker/logs/*.jsonl` in real time using chokidar, with per-file byte cursors
+The app tails `~/.claude/onlooker/core/logs/*.jsonl` in real time using chokidar, with per-file byte cursors
 so only newly appended lines are read — not the full file on every change.
 
 ## Project structure

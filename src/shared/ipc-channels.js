@@ -39,7 +39,13 @@ export const IPC = {
 };
 
 export const PLUGINS = {
+  ONLOOKER:  "core",
+  RELAY:     "relay",
+  CUES:      "cues",
+  ORACLE:    "oracle",
+  LEDGER:    "ledger",
   SENTINEL:  "sentinel",
+  WARDEN:    "warden",
   TRIBUNAL:  "tribunal",
   ARCHIVIST: "archivist",
   SCRIBE:    "scribe",
