@@ -39,7 +39,7 @@ export const IPC = {
 };
 
 export const PLUGINS = {
-  ONLOOKER:  "core",
+  CORE:      "core",
   RELAY:     "relay",
   CUES:      "cues",
   ORACLE:    "oracle",

@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const ipc = window.onlooker;
 
 // ── useEventFeed ──────────────────────────────────────────────────────────────
-// Subscribes to ~/.claude/onlooker/logs/*.jsonl on mount.
+// Subscribes to ~/.claude/onlooker/core/logs/*.jsonl on mount.
 // Capped at 2000 events in memory; older events are visible via Sessions view.
 export function useEventFeed() {
   const [events, setEvents] = useState([]);

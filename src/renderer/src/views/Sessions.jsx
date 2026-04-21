@@ -12,7 +12,7 @@ const C = {
   textPrimary: "#e2e8f0", textSecondary: "#94a3b8", textMuted: "#475569",
 };
 
-// Plugin colours/labels/statuses imported from ../plugins.js
+// Plugin colors/labels/statuses imported from ../plugins.js
 
 function scoreColor(s) {
   if (s == null) return C.textMuted;

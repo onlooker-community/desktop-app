@@ -1,12 +1,12 @@
 // Central plugin registry — single source of truth for all plugin metadata.
-// Import this wherever plugin colours, labels, or categories are needed.
+// Import this wherever plugin colors, labels, or categories are needed.
 //
 // Plugin inventory based on the Onlooker Marketplace:
 //   https://github.com/onlooker-community/onlooker-marketplace
 
 export const PLUGIN_REGISTRY = {
     // ── Core observability ────────────────────────────────────────────────────
-    onlooker: {
+    core: {
       label:    "ONL",
       color:    "#f472b6",   // pink — the flagship
       category: "Foundational",
@@ -103,7 +103,7 @@ export const PLUGIN_REGISTRY = {
   export const PLUGIN_COLORS = Object.fromEntries(PLUGIN_IDS.map(id => [id, PLUGIN_REGISTRY[id].color]));
   export const PLUGIN_LABELS = Object.fromEntries(PLUGIN_IDS.map(id => [id, PLUGIN_REGISTRY[id].label]));
   
-  // Status values and their display colours
+  // Status values and their display colors
   export const STATUS_COLORS = {
     pass:  "#4ade80",   // green
     info:  "#22d3ee",   // cyan
@@ -122,7 +122,7 @@ export const PLUGIN_REGISTRY = {
     return acc;
   }, {});
   
-  // Helper: get display colour for a plugin, falling back gracefully
+  // Helper: get display color for a plugin, falling back gracefully
   export function pluginColor(id) {
     return PLUGIN_REGISTRY[id]?.color ?? "#475569";
   }

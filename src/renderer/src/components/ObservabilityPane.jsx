@@ -1,6 +1,6 @@
 // The right-hand telemetry panel. Three tabs:
 //
-//   Live Feed  — every hook event as it arrives, colour-coded by plugin/status
+//   Live Feed  — every hook event as it arrives, color-coded by plugin/status
 //   Metrics    — session score gauge, plugin activity bars, agent layer decomposition
 //   Debug      — raw JSONL event dump + active hooks.json display
 
