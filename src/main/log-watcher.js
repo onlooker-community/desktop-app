@@ -30,6 +30,24 @@ const watchers = new Map();
 // Map from absolute file path → byte offset (how far we've read)
 const cursors = new Map();
 
+// JSONL files that are internal tracking data, not user-facing events.
+// These are excluded from the live feed and historical queries.
+const EXCLUDED_PATTERNS = [
+  /hook-health\.jsonl$/,
+  /session-summaries\//,
+  /session-trackers\//,
+  /compact-trackers\//,
+  /metrics\/costs\.jsonl$/,
+];
+
+function isExcludedFile(filePath) {
+  return EXCLUDED_PATTERNS.some((re) => re.test(filePath));
+}
+
+// Normalise plugin name: the marketplace plugin emits "onlooker" but
+// the desktop registry uses "core" for the core observability plugin.
+const PLUGIN_ALIASES = { onlooker: "core" };
+
 function resolveDir(logDir) {
   return logDir.replace(/^~/, os.homedir());
 }
@@ -62,7 +80,8 @@ function normalise(event, inferredPlugin) {
   // Already in canonical form — has ts and label
   if (event.ts && event.label) return event;
 
-  const plugin  = event.plugin ?? inferredPlugin ?? "unknown";
+  const rawPlugin = event.plugin ?? inferredPlugin ?? "unknown";
+  const plugin = PLUGIN_ALIASES[rawPlugin] ?? rawPlugin;
 
   // Timestamp: prefer ts, fall back to timestamp
   const ts = event.ts ?? event.timestamp ?? new Date().toISOString();
@@ -99,19 +118,49 @@ function normalise(event, inferredPlugin) {
   const type = event.type ?? event.event_type ?? event.trigger ?? event.event ?? "unknown";
 
   // Label: build human-readable label from event data.
-  // tool_outcome events get special treatment: "Tool: target" format.
   let label = event.label;
+
+  // tool_outcome: "Tool: target"
   if (!label && type === "tool_outcome" && p) {
     const tool = p.tool ?? "unknown";
     const target = p.target;
     if (target) {
-      // Shorten file paths to basename for display
       const short = target.length > 60 ? "…" + target.slice(-55) : target;
       label = `${tool}: ${short}`;
     } else {
       label = tool;
     }
   }
+
+  // Enriched envelope events with hook_type + tool_name: "HookType: ToolName"
+  const tn = event.tool_name ?? event.payload?.tool_name ?? p?.tool ?? null;
+  if (!label && tn) {
+    const hookLabel = event.hook_type ?? type.replace(/_/g, " ");
+    label = `${hookLabel}: ${tn}`;
+  }
+
+  // Named event types → human-readable
+  if (!label && type !== "unknown") {
+    const EVENT_LABELS = {
+      turn_start:      "Turn started",
+      cost_tracked:    "Cost tracked",
+      session_start:   "Session started",
+      session_end:     "Session ended",
+      session_duration:"Session duration",
+      tool_activity:   "Tool activity",
+      agent_spawn:     p?.subagent_type ? `Agent: ${p.subagent_type}` : "Agent spawned",
+      context_compact: "Context compacted",
+      skill_invoked:   p?.skill ? `Skill: ${p.skill}` : "Skill invoked",
+      file_read:       p?.file ? `Read: ${p.file}` : "File read",
+      pre_compact:     "Pre-compact snapshot",
+      "state-triggers":"State trigger",
+      "task-gate":     "Task gate",
+      "context-threshold": "Context threshold",
+    };
+    label = EVENT_LABELS[type] ?? null;
+  }
+
+  // Fallback: raw type with tool if available
   if (!label) {
     const stateHint = event.state ? ` · ${event.state.replace(/_/g, " ")}` : "";
     label = event.tool ? `${type}: ${event.tool}${stateHint}` : `${type}${stateHint}`;
@@ -223,7 +272,7 @@ async function queryLogs(logDir, { from, to, plugins, limit } = {}) {
   const resolved = resolveDir(logDir);
   const events = [];
 
-  const files = collectJsonlFiles(resolved);
+  const files = collectJsonlFiles(resolved).filter((f) => !isExcludedFile(f));
 
   for (const file of files) {
     await new Promise((resolve) => {
@@ -278,7 +327,9 @@ export function registerLogHandlers(ipcMain, mainWindow, store) {
       },
     });
 
-    watcher.on("change", (filePath) => tailNewLines(filePath, dir, forward));
+    watcher.on("change", (filePath) => {
+      if (!isExcludedFile(filePath)) tailNewLines(filePath, dir, forward);
+    });
 
     watcher.on("add", (filePath) => {
       // New file — set cursor at end so we only tail future appends
