@@ -19,6 +19,9 @@ export const IPC = {
   LOGS_EVENT:           "logs:event",
   LOGS_QUERY:           "logs:query",
 
+  // Cost data (reads **/costs.jsonl directly — excluded from event stream)
+  COSTS_QUERY:          "costs:query",
+
   // Weekly review
   REVIEW_REQUEST:       "review:request",
   REVIEW_READY:         "review:ready",

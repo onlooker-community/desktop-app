@@ -273,6 +273,31 @@ function buildToolCalls(events) {
   return toolCalls;
 }
 
+// ── useCostData ───────────────────────────────────────────────────────────────
+// Reads all **/costs.jsonl files via the dedicated COSTS_QUERY channel.
+// Returns an array of cost records — one per turn/stop, not per session.
+// Callers aggregate by session_id as needed.
+//
+// Record shape:
+//   { ts, session_id, model, input_tokens, output_tokens,
+//     cache_read_tokens, cache_creation_tokens, estimated_cost_usd }
+export function useCostData() {
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    ipc.costs.query({}).then((data) => {
+      setRecords(data ?? []);
+      setLoading(false);
+    }).catch(() => {
+      setRecords([]);
+      setLoading(false);
+    });
+  }, []);
+
+  return { records, loading };
+}
+
 // ── useOnboarding ─────────────────────────────────────────────────────────────
 // Determines which onboarding state to show on first launch.
 // Returns null once onboarding is complete (logs exist).

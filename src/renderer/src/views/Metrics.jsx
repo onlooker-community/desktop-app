@@ -5,6 +5,7 @@ import {
   PLUGIN_IDS, PLUGIN_COLORS, PLUGIN_REGISTRY,
   STATUS_COLORS, pluginColor,
 } from "../plugins.js";
+import { useCostData } from "../hooks/useOnlooker.js";
 
 const C = {
   bg0: "#0b0d14", bg1: "#12151f", bg2: "#181c2a", bg3: "#1f2335",
@@ -252,10 +253,244 @@ function FlaggedPatterns({ allEvents }) {
   );
 }
 
+// ── Cost helpers ─────────────────────────────────────────────────────────────
+
+function fmtCost(n) {
+  if (n == null || isNaN(n)) return "—";
+  if (n < 0.005)             return "<$0.01";
+  return "$" + n.toFixed(2);
+}
+
+function fmtTokens(n) {
+  if (n == null)  return "—";
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
+  if (n >= 1_000)     return (n / 1_000).toFixed(0) + "k";
+  return String(n);
+}
+
+// Filter raw cost records by the same range used for sessions.
+function filterCostsByRange(records, range) {
+  const now    = new Date();
+  const cutoff = {
+    today: new Date(now.getFullYear(), now.getMonth(), now.getDate()),
+    week:  new Date(now - 7  * 86400000),
+    month: new Date(now - 30 * 86400000),
+    all:   new Date(0),
+  }[range];
+  return records.filter((r) => new Date(r.ts) >= cutoff);
+}
+
+// Aggregate per-turn cost records into per-session summaries.
+function aggregateBySessions(records) {
+  const map = {};
+  for (const r of records) {
+    const sid = r.session_id || "unknown";
+    if (!map[sid]) map[sid] = {
+      session_id:   sid,
+      total_cost:   0,
+      input_tokens:  0,
+      output_tokens: 0,
+      cache_tokens:  0,
+      turns:         0,
+      last_ts:       r.ts,
+    };
+    const s = map[sid];
+    s.total_cost   += r.estimated_cost_usd;
+    s.input_tokens  += r.input_tokens;
+    s.output_tokens += r.output_tokens;
+    s.cache_tokens  += (r.cache_read_tokens + r.cache_creation_tokens);
+    s.turns         += 1;
+    if (r.ts > s.last_ts) s.last_ts = r.ts;
+  }
+  return Object.values(map).sort((a, b) => b.total_cost - a.total_cost);
+}
+
+// ── CostTrend ─────────────────────────────────────────────────────────────────
+// Area chart of cost per day, using Ledger green.
+
+function CostTrend({ records }) {
+  const byDay = useMemo(() => {
+    const map = {};
+    for (const r of records) {
+      const day = r.ts.slice(0, 10);
+      if (!map[day]) map[day] = 0;
+      map[day] += r.estimated_cost_usd;
+    }
+    return Object.entries(map)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([day, cost]) => ({ day, cost }));
+  }, [records]);
+
+  if (byDay.length < 2) return null;
+
+  const w = 480, h = 64, px = 8, py = 8;
+  const maxCost = Math.max(...byDay.map((d) => d.cost), 0.01);
+  const xs = byDay.map((_, i) => px + (i / (byDay.length - 1)) * (w - px * 2));
+  const ys = byDay.map((d) => h - py - (d.cost / maxCost) * (h - py * 2));
+  const line = xs.map((x, i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${ys[i].toFixed(1)}`).join(" ");
+  const area = `${line} L${xs[xs.length-1]},${h} L${xs[0]},${h} Z`;
+
+  return (
+    <div style={{ background: C.bg2, borderRadius: 10, padding: "16px 18px",
+      border: `1px solid ${C.border}`, marginBottom: 16 }}>
+      <div style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.07em",
+        textTransform: "uppercase", fontFamily: "monospace", marginBottom: 10 }}>
+        Cost over time
+      </div>
+      <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
+        <defs>
+          <linearGradient id="cg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stopColor={C.green} stopOpacity="0.3" />
+            <stop offset="100%" stopColor={C.green} stopOpacity="0"   />
+          </linearGradient>
+        </defs>
+        <path d={area} fill="url(#cg)" />
+        <path d={line} fill="none" stroke={C.green} strokeWidth={2}
+          strokeLinecap="round" strokeLinejoin="round" />
+        {xs.map((x, i) => (
+          <circle key={i} cx={x} cy={ys[i]} r={3} fill={C.green} />
+        ))}
+      </svg>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+        {[byDay[0], byDay[byDay.length - 1]].map((p, i) => (
+          <span key={i} style={{ fontSize: 9, color: C.textMuted, fontFamily: "monospace" }}>
+            {new Date(p.day + "T12:00:00").toLocaleDateString("en-US",
+              { month: "short", day: "numeric" })}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── TopSessionsByCost ─────────────────────────────────────────────────────────
+// Horizontal bar list of most expensive sessions.
+
+function TopSessionsByCost({ sessions }) {
+  if (sessions.length === 0) return null;
+  const top     = sessions.slice(0, 8);
+  const maxCost = top[0].total_cost;
+
+  return (
+    <div style={{ background: C.bg2, borderRadius: 10, padding: "16px 18px",
+      border: `1px solid ${C.border}`, marginBottom: 16 }}>
+      <div style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.07em",
+        textTransform: "uppercase", fontFamily: "monospace", marginBottom: 14 }}>
+        Top Sessions by Cost
+      </div>
+      {top.map((s) => {
+        const pct   = maxCost > 0 ? (s.total_cost / maxCost) * 100 : 0;
+        const sid   = s.session_id === "unknown"
+          ? "unknown"
+          : s.session_id.slice(0, 8) + "…";
+        const date  = s.last_ts.slice(0, 10);
+        const total = s.input_tokens + s.output_tokens + s.cache_tokens;
+        return (
+          <div key={s.session_id} style={{ marginBottom: 9 }}>
+            <div style={{ display: "flex", justifyContent: "space-between",
+              alignItems: "center", marginBottom: 3 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <span style={{ fontSize: 10, color: C.textSecondary,
+                  fontFamily: "monospace" }}>{sid}</span>
+                <span style={{ fontSize: 9, color: C.textMuted }}>{date}</span>
+                {s.turns > 1 && (
+                  <span style={{ fontSize: 9, color: C.textMuted }}>
+                    {s.turns} turns
+                  </span>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <span style={{ fontSize: 9, color: C.textMuted, fontFamily: "monospace" }}>
+                  {fmtTokens(total)} tok
+                </span>
+                <span style={{ fontSize: 10, color: C.green,
+                  fontFamily: "'JetBrains Mono', monospace", fontWeight: 600 }}>
+                  {fmtCost(s.total_cost)}
+                </span>
+              </div>
+            </div>
+            <div style={{ height: 3, borderRadius: 2, background: C.bg3 }}>
+              <div style={{ width: `${pct}%`, height: "100%", borderRadius: 2,
+                background: C.green, transition: "width 0.4s ease" }} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── TokenBreakdown ────────────────────────────────────────────────────────────
+// Shows the input / output / cache token split as labelled proportion bars.
+
+function TokenBreakdown({ records }) {
+  const totals = useMemo(() => {
+    let input = 0, output = 0, cache = 0;
+    for (const r of records) {
+      input  += r.input_tokens;
+      output += r.output_tokens;
+      cache  += (r.cache_read_tokens + r.cache_creation_tokens);
+    }
+    return { input, output, cache, total: input + output + cache };
+  }, [records]);
+
+  if (totals.total === 0) return null;
+
+  const bars = [
+    { label: "Input",  value: totals.input,  color: C.cyan   },
+    { label: "Output", value: totals.output, color: C.pink   },
+    { label: "Cache",  value: totals.cache,  color: C.yellow },
+  ].filter((b) => b.value > 0);
+
+  return (
+    <div style={{ background: C.bg2, borderRadius: 10, padding: "16px 18px",
+      border: `1px solid ${C.border}`, marginBottom: 16 }}>
+      <div style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.07em",
+        textTransform: "uppercase", fontFamily: "monospace", marginBottom: 14 }}>
+        Token Breakdown
+      </div>
+
+      {/* Stacked proportion bar */}
+      <div style={{ display: "flex", height: 8, borderRadius: 4,
+        overflow: "hidden", marginBottom: 12 }}>
+        {bars.map((b) => (
+          <div key={b.label} style={{
+            flex: b.value,
+            background: b.color,
+            opacity: 0.8,
+          }} />
+        ))}
+      </div>
+
+      {/* Legend */}
+      <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+        {bars.map((b) => {
+          const pct = totals.total > 0
+            ? ((b.value / totals.total) * 100).toFixed(0)
+            : 0;
+          return (
+            <div key={b.label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ width: 8, height: 8, borderRadius: 2,
+                background: b.color, opacity: 0.8 }} />
+              <span style={{ fontSize: 10, color: C.textSecondary }}>
+                {b.label}
+              </span>
+              <span style={{ fontSize: 10, color: C.textMuted, fontFamily: "monospace" }}>
+                {fmtTokens(b.value)} ({pct}%)
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Main view ─────────────────────────────────────────────────────────────────
 
 export default function Metrics({ sessions }) {
   const [range, setRange] = useState("week");
+  const { records: allCostRecords } = useCostData();
 
   const filtered  = useMemo(() => filterByRange(sessions, range), [sessions, range]);
   const allEvents = useMemo(() => filtered.flatMap((s) => s.events ?? []), [filtered]);
@@ -270,6 +505,15 @@ export default function Metrics({ sessions }) {
 
   const totalWarns = useMemo(() =>
     allEvents.filter((e) => e.status === "warn" || e.status === "fail").length, [allEvents]);
+
+  // Cost data filtered to the same range
+  const costRecords   = useMemo(() =>
+    filterCostsByRange(allCostRecords, range), [allCostRecords, range]);
+  const costSessions  = useMemo(() =>
+    aggregateBySessions(costRecords), [costRecords]);
+  const totalCost     = useMemo(() =>
+    costRecords.reduce((s, r) => s + r.estimated_cost_usd, 0), [costRecords]);
+  const avgCostPerSes = costSessions.length > 0 ? totalCost / costSessions.length : null;
 
   return (
     <div style={{ height: "100%", overflowY: "auto", padding: "20px 24px" }}>
@@ -306,13 +550,67 @@ export default function Metrics({ sessions }) {
       {/* Score sparkline */}
       <ScoreSparkline sessions={filtered} />
 
-      {/* Plugin activity grouped by category */}
-      <PluginActivity allEvents={allEvents} />
+      {/* ── Cost section ──────────────────────────────────────────────────── */}
+      {costRecords.length > 0 && (
+        <>
+          {/* Cost summary divider */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+            <div style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.07em",
+              textTransform: "uppercase", fontFamily: "monospace", whiteSpace: "nowrap" }}>
+              Cost
+            </div>
+            <div style={{ flex: 1, height: 1, background: C.border }} />
+            <span style={{ fontSize: 9, color: C.textMuted, fontFamily: "monospace" }}>
+              via Ledger
+            </span>
+          </div>
 
-      {/* Top flagged patterns */}
-      <FlaggedPatterns allEvents={allEvents} />
+          {/* Cost summary cards */}
+          <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+            <StatCard label="Total Cost"
+              value={fmtCost(totalCost)}
+              color={totalCost > 5 ? C.red : totalCost > 1 ? C.yellow : C.green} />
+            <StatCard label="Avg / Session"
+              value={fmtCost(avgCostPerSes)}
+              color={C.green} />
+            <StatCard label="Most Expensive"
+              value={fmtCost(costSessions[0]?.total_cost)}
+              color={C.textSecondary} />
+            <StatCard label="Sessions w/ Cost"
+              value={costSessions.length} />
+          </div>
 
-      {filtered.length === 0 && (
+          {/* Cost trend */}
+          <CostTrend records={costRecords} />
+
+          {/* Token breakdown */}
+          <TokenBreakdown records={costRecords} />
+
+          {/* Top sessions by cost */}
+          <TopSessionsByCost sessions={costSessions} />
+        </>
+      )}
+
+      {/* ── Quality section ───────────────────────────────────────────────── */}
+      {allEvents.length > 0 && (
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+            <div style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.07em",
+              textTransform: "uppercase", fontFamily: "monospace", whiteSpace: "nowrap" }}>
+              Quality
+            </div>
+            <div style={{ flex: 1, height: 1, background: C.border }} />
+          </div>
+
+          {/* Plugin activity grouped by category */}
+          <PluginActivity allEvents={allEvents} />
+
+          {/* Top flagged patterns */}
+          <FlaggedPatterns allEvents={allEvents} />
+        </>
+      )}
+
+      {filtered.length === 0 && costRecords.length === 0 && (
         <div style={{ textAlign: "center", padding: "40px 0",
           color: C.textMuted, fontSize: 12 }}>
           No sessions in this time range

@@ -21,6 +21,7 @@ const IPC = {
   LOGS_UNSUBSCRIBE:  "logs:unsubscribe",
   LOGS_EVENT:        "logs:event",
   LOGS_QUERY:        "logs:query",
+  COSTS_QUERY:       "costs:query",
   REVIEW_REQUEST:    "review:request",
   REVIEW_READY:      "review:ready",
   SETTINGS_GET:      "settings:get",
@@ -69,6 +70,10 @@ contextBridge.exposeInMainWorld("onlooker", {
       ipcRenderer.on(IPC.LOGS_EVENT, handler);
       return () => ipcRenderer.removeListener(IPC.LOGS_EVENT, handler);
     },
+  },
+
+  costs: {
+    query: (opts) => ipcRenderer.invoke(IPC.COSTS_QUERY, opts ?? {}),
   },
 
   review: {

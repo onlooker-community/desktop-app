@@ -302,6 +302,69 @@ async function queryLogs(logDir, { from, to, plugins, limit } = {}) {
   return limit ? sorted.slice(-limit) : sorted;
 }
 
+// Query all **/costs.jsonl files — these are excluded from the event stream
+// because they're internal tracking files, but the Metrics view reads them
+// directly to surface cost data as a first-class metric.
+//
+// Each record shape:
+//   { ts, session_id, model, input_tokens, output_tokens,
+//     cache_read_tokens, cache_creation_tokens, estimated_cost_usd }
+//
+// Multiple records per session are normal (one per Stop hook / turn).
+// Caller sums them to get per-session totals.
+async function queryCosts(logDir, { from, to } = {}) {
+  const resolved = resolveDir(logDir);
+  const records  = [];
+
+  const costFiles = collectJsonlFiles(resolved).filter((f) => /costs\.jsonl$/.test(f));
+
+  for (const file of costFiles) {
+    await new Promise((resolve) => {
+      const stream = fs.createReadStream(file, { encoding: "utf8" });
+      const rl     = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+      rl.on("line", (line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        try {
+          const raw = JSON.parse(trimmed);
+          const ts  = raw.timestamp ?? raw.ts;
+          if (!ts) return;
+          if (from && new Date(ts) < new Date(from)) return;
+          if (to   && new Date(ts) > new Date(to))   return;
+          const cost = raw.estimated_cost_usd ?? 0;
+          // Skip zero-cost, zero-token records (session stubs with no activity)
+          if (cost === 0 && (raw.input_tokens ?? 0) === 0) return;
+          records.push({
+            ts,
+            session_id:            raw.session_id ?? "",
+            model:                 raw.model ?? "default",
+            input_tokens:          raw.input_tokens          ?? 0,
+            output_tokens:         raw.output_tokens         ?? 0,
+            cache_read_tokens:     raw.cache_read_tokens     ?? 0,
+            cache_creation_tokens: raw.cache_creation_tokens ?? 0,
+            estimated_cost_usd:    cost,
+          });
+        } catch { /* skip malformed lines */ }
+      });
+
+      rl.on("close", resolve);
+    });
+  }
+
+  // Deduplicate: the same turn can appear in both the old flat costs.jsonl
+  // and the newer core/metrics/costs.jsonl path.
+  const seen   = new Set();
+  const deduped = records.filter((r) => {
+    const key = `${r.session_id}:${r.ts}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return deduped.sort((a, b) => new Date(a.ts) - new Date(b.ts));
+}
+
 export function registerLogHandlers(ipcMain, mainWindow, store) {
   const forward = (event) => mainWindow?.webContents.send(IPC.LOGS_EVENT, event);
 
@@ -350,6 +413,10 @@ export function registerLogHandlers(ipcMain, mainWindow, store) {
 
   ipcMain.handle(IPC.LOGS_QUERY, (_e, opts) => {
     return queryLogs(store.get("logDir"), opts ?? {});
+  });
+
+  ipcMain.handle(IPC.COSTS_QUERY, (_e, opts) => {
+    return queryCosts(store.get("logDir"), opts ?? {});
   });
 }
 

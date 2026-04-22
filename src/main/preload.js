@@ -46,6 +46,11 @@ contextBridge.exposeInMainWorld("onlooker", {
     },
   },
 
+  // ── Cost data (Ledger / core cost tracking) ───────────────────────────────
+  costs: {
+    query: (opts) => ipcRenderer.invoke(IPC.COSTS_QUERY, opts ?? {}),
+  },
+
   // ── Weekly review ─────────────────────────────────────────────────────────
   review: {
     request: (weekStart) => ipcRenderer.invoke(IPC.REVIEW_REQUEST, { weekStart }),
