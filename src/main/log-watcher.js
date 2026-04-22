@@ -67,8 +67,12 @@ function normalise(event, inferredPlugin) {
   // Timestamp: prefer ts, fall back to timestamp
   const ts = event.ts ?? event.timestamp ?? new Date().toISOString();
 
-  // Session: prefer session, fall back to session_id
-  const session = event.session ?? event.session_id ?? null;
+  // Session: prefer session, fall back to session_id, then payload.session_id
+  // (enriched envelope events may have empty top-level session_id with real value in payload)
+  const rawSession = event.session ?? event.session_id ?? null;
+  const session = (rawSession && rawSession !== "")
+    ? rawSession
+    : (event.payload?.session_id ?? null);
 
   // Status: map decision/status values to canonical set
   let status = event.status;
