@@ -410,7 +410,7 @@ async function queryCosts(logDir, { from, to } = {}) {
 export function registerLogHandlers(ipcMain, mainWindow, store) {
   const forward = (event) => mainWindow?.webContents.send(IPC.LOGS_EVENT, event);
 
-  ipcMain.handle(IPC.LOGS_SUBSCRIBE, (_e, { logDir }) => {
+  ipcMain.handle(IPC.LOGS_SUBSCRIBE, async (_e, { logDir }) => {
     const dir = resolveDir(logDir ?? store.get("logDir"));
 
     // Create the directory if it doesn't exist yet
@@ -418,6 +418,24 @@ export function registerLogHandlers(ipcMain, mainWindow, store) {
 
     // Stop any existing watcher for this directory before creating a new one
     watchers.get(dir)?.close();
+    cursors.clear();
+
+    // Pre-set cursors to EOF for all existing JSONL files. Without this, the
+    // first "change" event on any pre-existing file (counsel, warden, oracle…)
+    // would replay its *entire* history from byte 0 — because tailNewLines
+    // starts from cursor 0 when a file hasn't been seen yet. Pre-setting to
+    // EOF means only content written *after* this subscribe call is forwarded
+    // as live events.
+    //
+    // Cartographer writes a new file per audit (never appends), so its most
+    // recent event file would have been skipped entirely by ignoreInitial:true
+    // and never received a change event. The initial hydration below fills
+    // this gap for Cartographer and any other plugin in the same situation.
+    const existingFiles = collectJsonlFiles(dir).filter((f) => !isExcludedFile(f));
+    for (const file of existingFiles) {
+      const stat = fs.statSync(file, { throwIfNoEntry: false });
+      if (stat) cursors.set(file, stat.size);
+    }
 
     // Use **/*.jsonl to watch files at any subdirectory depth:
     //   ~/.claude/onlooker/tribunal/session-abc.jsonl  ✓
@@ -437,14 +455,21 @@ export function registerLogHandlers(ipcMain, mainWindow, store) {
     });
 
     watcher.on("add", (filePath) => {
-      // New file — read its initial content immediately (cursor starts at 0).
-      // Cartographer and other agents write a file once and never append to it,
-      // so setting the cursor to EOF here would permanently miss the content.
+      // New file created while the app is running (e.g. a fresh Cartographer
+      // audit). Read from byte 0 — cursor was never set for this path.
       if (!isExcludedFile(filePath)) tailNewLines(filePath, dir, forward);
     });
 
     watchers.set(dir, watcher);
-    return { ok: true, dir };
+
+    // Hydrate the live feed with recent history (last 2 hours) so the feed
+    // isn't empty on first open and shows context from recent sessions.
+    // This surfaces events from Cartographer, Oracle, Cues, and other plugins
+    // whose files existed before the watcher started.
+    const from = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    const initial = await queryLogs(dir, { from, limit: 500 });
+
+    return { ok: true, dir, initial };
   });
 
   ipcMain.handle(IPC.LOGS_UNSUBSCRIBE, () => {

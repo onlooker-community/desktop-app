@@ -6,7 +6,11 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const ipc = window.onlooker;
 
 // ── useEventFeed ──────────────────────────────────────────────────────────────
-// Subscribes to ~/.claude/onlooker/core/logs/*.jsonl on mount.
+// Subscribes to ~/.claude/onlooker/**/*.jsonl on mount.
+// On subscribe, seeds the feed with up to 500 events from the last 2 hours so
+// that Cartographer audits, Oracle checks, Cues events, and other plugins whose
+// files exist before the app opens are visible immediately — not just events
+// that arrive while the app is running.
 // Capped at 2000 events in memory; older events are visible via Sessions view.
 export function useEventFeed() {
   const [events, setEvents] = useState([]);
@@ -14,7 +18,11 @@ export function useEventFeed() {
   const lastEventRef = useRef(null);
 
   useEffect(() => {
-    ipc.settings.get().then((s) => ipc.logs.subscribe(s.logDir));
+    ipc.settings.get().then((s) =>
+      ipc.logs.subscribe(s.logDir).then(({ initial }) => {
+        if (initial?.length) setEvents(initial.slice(-1999));
+      })
+    );
 
     const unsub = ipc.logs.onEvent((event) => {
       lastEventRef.current = Date.now();
