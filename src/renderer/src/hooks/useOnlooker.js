@@ -489,6 +489,50 @@ export function useDeadEnds() {
   return { records, loading };
 }
 
+// ── useInstructionGraph ──────────────────────────────────────────────────────
+// Reads instruction graph data from Cartographer audit + instruction files.
+export function useInstructionGraph() {
+  const [graph, setGraph] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    ipc.instructionGraph.query().then((data) => {
+      setGraph(data ?? null);
+      setLoading(false);
+    }).catch(() => {
+      setGraph(null);
+      setLoading(false);
+    });
+  }, []);
+
+  return { graph, loading };
+}
+
+// ── useInstructionWatcher ───────────────────────────────────────────────────
+// Watches CLAUDE.md and rules files for changes and receives diffs.
+export function useInstructionWatcher(watchPaths) {
+  const [changes, setChanges] = useState([]);
+  const [watching, setWatching] = useState(false);
+
+  useEffect(() => {
+    if (!watchPaths || watchPaths.length === 0) return;
+
+    ipc.watchInstructions.start(watchPaths).then(() => setWatching(true));
+
+    const unsub = ipc.watchInstructions.onEvent((event) => {
+      setChanges((prev) => [event, ...prev].slice(0, 50));
+    });
+
+    return () => {
+      unsub?.();
+      ipc.watchInstructions.stop();
+      setWatching(false);
+    };
+  }, [watchPaths?.join(",")]);
+
+  return { changes, watching };
+}
+
 // ── usePlugin ─────────────────────────────────────────────────────────────────
 export function usePlugin() {
   const [running, setRunning] = useState(null);

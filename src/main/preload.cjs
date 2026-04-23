@@ -25,6 +25,10 @@ const IPC = {
   HEALTH_QUERY:      "health:query",
   HEATMAP_QUERY:     "heatmap:query",
   DEAD_ENDS_QUERY:   "dead-ends:query",
+  INSTRUCTION_GRAPH_QUERY: "instruction-graph:query",
+  WATCH_INSTRUCTIONS:      "watch:instructions",
+  WATCH_INSTRUCTIONS_EVENT:"watch:instructions-event",
+  WATCH_INSTRUCTIONS_STOP: "watch:instructions-stop",
   REVIEW_REQUEST:    "review:request",
   REVIEW_READY:      "review:ready",
   SETTINGS_GET:      "settings:get",
@@ -89,6 +93,20 @@ contextBridge.exposeInMainWorld("onlooker", {
 
   deadEnds: {
     query: (opts) => ipcRenderer.invoke(IPC.DEAD_ENDS_QUERY, opts ?? {}),
+  },
+
+  instructionGraph: {
+    query: () => ipcRenderer.invoke(IPC.INSTRUCTION_GRAPH_QUERY),
+  },
+
+  watchInstructions: {
+    start: (paths) => ipcRenderer.invoke(IPC.WATCH_INSTRUCTIONS, { paths }),
+    stop: () => ipcRenderer.invoke(IPC.WATCH_INSTRUCTIONS_STOP),
+    onEvent: (cb) => {
+      const handler = (_e, data) => cb(data);
+      ipcRenderer.on(IPC.WATCH_INSTRUCTIONS_EVENT, handler);
+      return () => ipcRenderer.removeListener(IPC.WATCH_INSTRUCTIONS_EVENT, handler);
+    },
   },
 
   review: {

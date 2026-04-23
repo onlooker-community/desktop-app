@@ -558,6 +558,214 @@ async function queryDeadEnds(logDir, { from, to } = {}) {
   return deduped.sort((a, b) => new Date(b.ts) - new Date(a.ts));
 }
 
+// Build an instruction graph from Cartographer audit data and instruction files.
+// Returns { nodes: [{id, type, label, file, issues}], edges: [{source, target, type}] }
+function queryInstructionGraph(logDir) {
+  const resolved = resolveDir(logDir);
+  const health = readInstructionHealth(logDir);
+  const nodes = [];
+  const edges = [];
+  const nodeMap = new Map();
+
+  // Helper to add a node if not already present
+  function addNode(id, props) {
+    if (nodeMap.has(id)) return;
+    nodeMap.set(id, nodes.length);
+    nodes.push({ id, ...props });
+  }
+
+  // Parse instruction files from Cartographer data
+  const instructionFiles = health?.instruction_files ?? [];
+  const issues = health?.issues ?? [];
+  const cwd = health?.cwd ?? "";
+
+  // If we have instruction files from the audit, use those
+  if (instructionFiles.length > 0) {
+    for (const f of instructionFiles) {
+      const relPath = cwd ? f.replace(cwd + "/", "") : f;
+      const name = relPath.split("/").pop();
+      addNode(f, {
+        type: "file",
+        label: name,
+        file: relPath,
+        issues: issues.filter((iss) =>
+          iss.files?.includes(f) || iss.files?.includes(relPath)
+        ).length,
+      });
+    }
+  } else {
+    // Fallback: try to discover instruction files from known paths
+    const tryPaths = [
+      path.join(cwd || os.homedir(), "CLAUDE.md"),
+      path.join(cwd || os.homedir(), ".claude", "CLAUDE.md"),
+    ];
+    // Also check .claude/rules/
+    const rulesDir = path.join(cwd || os.homedir(), ".claude", "rules");
+    if (fs.existsSync(rulesDir)) {
+      try {
+        for (const entry of fs.readdirSync(rulesDir, { withFileTypes: true })) {
+          if (entry.isFile() && entry.name.endsWith(".md")) {
+            tryPaths.push(path.join(rulesDir, entry.name));
+          }
+        }
+      } catch { /* skip */ }
+    }
+
+    for (const f of tryPaths) {
+      if (fs.existsSync(f)) {
+        const relPath = cwd ? f.replace(cwd + "/", "") : f;
+        const name = relPath.split("/").pop();
+        addNode(f, { type: "file", label: name, file: relPath, issues: 0 });
+      }
+    }
+  }
+
+  // Add issue nodes and edges from Cartographer findings
+  for (const iss of issues) {
+    const issId = `issue:${iss.id ?? iss.description?.slice(0, 40)}`;
+    addNode(issId, {
+      type: iss.severity === "high" ? "contradiction" : iss.category ?? "issue",
+      label: iss.description?.slice(0, 60) ?? "Issue",
+      severity: iss.severity,
+      category: iss.category,
+    });
+
+    // Link issue to relevant files
+    for (const f of (iss.files ?? [])) {
+      const fileId = nodeMap.has(f) ? f : [...nodeMap.keys()].find((k) => k.endsWith(f));
+      if (fileId) {
+        edges.push({
+          source: fileId,
+          target: issId,
+          type: iss.severity === "high" ? "contradiction" : "reference",
+        });
+      }
+    }
+  }
+
+  // Add cross-reference edges between instruction files (if content available)
+  const fileNodes = nodes.filter((n) => n.type === "file");
+  for (const fn of fileNodes) {
+    const fullPath = instructionFiles.find((f) => f === fn.id) ?? fn.id;
+    try {
+      const content = fs.readFileSync(fullPath, "utf8");
+      for (const other of fileNodes) {
+        if (other.id === fn.id) continue;
+        if (content.includes(other.label) || content.includes(other.file)) {
+          edges.push({ source: fn.id, target: other.id, type: "reference" });
+        }
+      }
+    } catch { /* file may not be accessible */ }
+  }
+
+  return {
+    nodes,
+    edges,
+    health_score: health?.health_score ?? null,
+    issue_count: health?.issue_count ?? { high: 0, medium: 0, low: 0 },
+  };
+}
+
+// Instruction file watcher — watches CLAUDE.md and .claude/rules/*.md for changes.
+// Sends diffs to the renderer when changes are detected.
+const instructionWatchers = new Map();
+
+function watchInstructionFiles(mainWindow, paths) {
+  // Stop any existing instruction watchers
+  stopInstructionWatchers();
+
+  for (const dir of paths) {
+    const resolved = resolveDir(dir);
+    const patterns = [
+      path.join(resolved, "CLAUDE.md"),
+      path.join(resolved, ".claude", "CLAUDE.md"),
+      path.join(resolved, ".claude", "rules", "*.md"),
+    ];
+
+    // Read initial file contents for diffing
+    const fileContents = new Map();
+    for (const pattern of patterns) {
+      // For glob patterns, resolve them
+      const base = pattern.replace(/\*\.md$/, "");
+      if (pattern.includes("*")) {
+        if (fs.existsSync(base)) {
+          try {
+            for (const entry of fs.readdirSync(base)) {
+              if (entry.endsWith(".md")) {
+                const full = path.join(base, entry);
+                try { fileContents.set(full, fs.readFileSync(full, "utf8")); } catch {}
+              }
+            }
+          } catch {}
+        }
+      } else if (fs.existsSync(pattern)) {
+        try { fileContents.set(pattern, fs.readFileSync(pattern, "utf8")); } catch {}
+      }
+    }
+
+    const watcher = chokidar.watch(patterns, {
+      persistent: true,
+      ignoreInitial: true,
+      awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 100 },
+    });
+
+    watcher.on("change", (filePath) => {
+      try {
+        const newContent = fs.readFileSync(filePath, "utf8");
+        const oldContent = fileContents.get(filePath) ?? "";
+        fileContents.set(filePath, newContent);
+
+        const relPath = filePath.replace(resolved + "/", "");
+
+        // Compute simple line-level diff
+        const oldLines = oldContent.split("\n");
+        const newLines = newContent.split("\n");
+        const added = newLines.filter((l) => !oldLines.includes(l)).length;
+        const removed = oldLines.filter((l) => !newLines.includes(l)).length;
+
+        mainWindow?.webContents.send(IPC.WATCH_INSTRUCTIONS_EVENT, {
+          type: "change",
+          file: relPath,
+          fullPath: filePath,
+          dir: resolved,
+          ts: new Date().toISOString(),
+          added,
+          removed,
+          oldContent,
+          newContent,
+        });
+      } catch { /* skip */ }
+    });
+
+    watcher.on("add", (filePath) => {
+      try {
+        const content = fs.readFileSync(filePath, "utf8");
+        fileContents.set(filePath, content);
+        const relPath = filePath.replace(resolved + "/", "");
+
+        mainWindow?.webContents.send(IPC.WATCH_INSTRUCTIONS_EVENT, {
+          type: "add",
+          file: relPath,
+          fullPath: filePath,
+          dir: resolved,
+          ts: new Date().toISOString(),
+          added: content.split("\n").length,
+          removed: 0,
+          oldContent: "",
+          newContent: content,
+        });
+      } catch { /* skip */ }
+    });
+
+    instructionWatchers.set(resolved, watcher);
+  }
+}
+
+function stopInstructionWatchers() {
+  instructionWatchers.forEach((w) => w.close());
+  instructionWatchers.clear();
+}
+
 export function registerLogHandlers(ipcMain, mainWindow, store) {
   const forward = (event) => mainWindow?.webContents.send(IPC.LOGS_EVENT, event);
 
@@ -649,9 +857,24 @@ export function registerLogHandlers(ipcMain, mainWindow, store) {
   ipcMain.handle(IPC.DEAD_ENDS_QUERY, (_e, opts) => {
     return queryDeadEnds(store.get("logDir"), opts ?? {});
   });
+
+  ipcMain.handle(IPC.INSTRUCTION_GRAPH_QUERY, () => {
+    return queryInstructionGraph(store.get("logDir"));
+  });
+
+  ipcMain.handle(IPC.WATCH_INSTRUCTIONS, (_e, { paths }) => {
+    watchInstructionFiles(mainWindow, paths ?? []);
+    return { ok: true };
+  });
+
+  ipcMain.handle(IPC.WATCH_INSTRUCTIONS_STOP, () => {
+    stopInstructionWatchers();
+    return { ok: true };
+  });
 }
 
 export function stopAllWatchers() {
   watchers.forEach((w) => w.close());
   watchers.clear();
+  stopInstructionWatchers();
 }

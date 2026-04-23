@@ -31,6 +31,14 @@ export const IPC = {
   // Dead ends (reads Archivist dead-ends.jsonl files)
   DEAD_ENDS_QUERY:      "dead-ends:query",
 
+  // Instruction graph (reads Cartographer audit + parses instruction files)
+  INSTRUCTION_GRAPH_QUERY: "instruction-graph:query",
+
+  // File system watcher for instruction files
+  WATCH_INSTRUCTIONS:      "watch:instructions",
+  WATCH_INSTRUCTIONS_EVENT:"watch:instructions-event",
+  WATCH_INSTRUCTIONS_STOP: "watch:instructions-stop",
+
   // Weekly review
   REVIEW_REQUEST:       "review:request",
   REVIEW_READY:         "review:ready",
@@ -85,4 +93,6 @@ export const DEFAULT_SETTINGS = {
   panelWidth:        320,
   weeklyReviewDay:   "sunday",
   contextWindowSize: 200000,
+  weeklyBudget:      0,        // 0 = no budget limit; in USD
+  watchPaths:        [],       // project dirs to watch for instruction file changes
 };

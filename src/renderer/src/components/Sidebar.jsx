@@ -15,13 +15,16 @@ const C = {
 };
 
 const NAV = [
-  { id: "feed",     icon: "⚡", label: "Live Feed"     },
-  { id: "sessions", icon: "◎",  label: "Sessions"      },
-  { id: "metrics",  icon: "▦",  label: "Metrics"       },
-  { id: "heatmap",  icon: "▧",  label: "Attention"     },
-  { id: "security", icon: "⊘",  label: "Security"      },
-  { id: "deadends", icon: "⊗",  label: "Dead Ends"     },
-  { id: "review",   icon: "☆",  label: "Weekly Review" },
+  { id: "feed",     icon: "⚡", label: "Live Feed"      },
+  { id: "sessions", icon: "◎",  label: "Sessions"       },
+  { id: "replay",   icon: "▶",  label: "Session Replay" },
+  { id: "metrics",  icon: "▦",  label: "Metrics"        },
+  { id: "heatmap",  icon: "▧",  label: "Attention"      },
+  { id: "security", icon: "⊘",  label: "Security"       },
+  { id: "anomalies",icon: "◇",  label: "Anomalies"      },
+  { id: "deadends", icon: "⊗",  label: "Dead Ends"      },
+  { id: "instgraph",icon: "⬡",  label: "Instructions"   },
+  { id: "review",   icon: "☆",  label: "Weekly Review"  },
 ];
 
 export default function Sidebar({ activeView, onNavigate, liveActive, blockCount, sessionCount, wardenBlocks, health, pressure }) {

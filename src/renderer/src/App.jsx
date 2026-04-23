@@ -14,6 +14,9 @@ import Metrics       from "./views/Metrics.jsx";
 import Security      from "./views/Security.jsx";
 import Heatmap       from "./views/Heatmap.jsx";
 import DeadEndMap    from "./views/DeadEndMap.jsx";
+import Anomalies     from "./views/Anomalies.jsx";
+import InstructionGraph from "./views/InstructionGraph.jsx";
+import SessionReplay from "./views/SessionReplay.jsx";
 import WeeklyReview  from "./views/WeeklyReview.jsx";
 
 import {
@@ -99,8 +102,11 @@ export default function App() {
               {view === "sessions" && <Sessions  sessions={sessions} loading={loading} />}
               {view === "metrics"  && <Metrics   sessions={sessions} />}
               {view === "security" && <Security  sessions={sessions} />}
+              {view === "replay"   && <SessionReplay sessions={sessions} />}
               {view === "heatmap"  && <Heatmap />}
+              {view === "anomalies" && <Anomalies sessions={sessions} />}
               {view === "deadends" && <DeadEndMap />}
+              {view === "instgraph" && <InstructionGraph />}
               {view === "review"   && <WeeklyReview sessions={sessions} />}
             </div>
           )

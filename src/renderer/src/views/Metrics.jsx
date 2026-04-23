@@ -753,6 +753,151 @@ function PluginROICards({ roi }) {
   );
 }
 
+// ── Budget Forecasting ──────────────────────────────────────────────────────
+// Weekly/monthly cost projection and time-of-day heatmap.
+
+function CostProjection({ records }) {
+  const projection = useMemo(() => {
+    if (records.length < 2) return null;
+
+    // Group by day
+    const byDay = {};
+    for (const r of records) {
+      const day = r.ts.slice(0, 10);
+      byDay[day] = (byDay[day] ?? 0) + r.estimated_cost_usd;
+    }
+    const days = Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b));
+    if (days.length < 2) return null;
+
+    // Last 7 days average daily cost
+    const last7 = days.slice(-7);
+    const avgDaily = last7.reduce((s, [, c]) => s + c, 0) / last7.length;
+    const weekProjection = avgDaily * 7;
+    const monthProjection = avgDaily * 30;
+
+    return { avgDaily, weekProjection, monthProjection, dayCount: days.length };
+  }, [records]);
+
+  if (!projection) return null;
+
+  return (
+    <div style={{ background: C.bg2, borderRadius: 10, padding: "16px 18px",
+      border: `1px solid ${C.border}`, marginBottom: 16 }}>
+      <div style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.07em",
+        textTransform: "uppercase", fontFamily: "monospace", marginBottom: 12 }}>
+        Cost Projection
+      </div>
+      <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 9, color: C.textMuted, marginBottom: 2 }}>Avg / Day</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: C.green,
+            fontFamily: "'JetBrains Mono', monospace" }}>
+            {fmtCost(projection.avgDaily)}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 9, color: C.textMuted, marginBottom: 2 }}>Week Projection</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary,
+            fontFamily: "'JetBrains Mono', monospace" }}>
+            {fmtCost(projection.weekProjection)}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 9, color: C.textMuted, marginBottom: 2 }}>Month Projection</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary,
+            fontFamily: "'JetBrains Mono', monospace" }}>
+            {fmtCost(projection.monthProjection)}
+          </div>
+        </div>
+      </div>
+      <div style={{ fontSize: 9, color: C.textMuted, marginTop: 8, fontFamily: "monospace" }}>
+        Based on {projection.dayCount}-day average
+      </div>
+    </div>
+  );
+}
+
+function CostByHour({ records }) {
+  const heatmap = useMemo(() => {
+    const grid = Array.from({ length: 7 }, () => Array(24).fill(0));
+    const counts = Array.from({ length: 7 }, () => Array(24).fill(0));
+
+    for (const r of records) {
+      const d = new Date(r.ts);
+      const dow = d.getDay(); // 0=Sun
+      const hour = d.getHours();
+      grid[dow][hour] += r.estimated_cost_usd;
+      counts[dow][hour]++;
+    }
+    return { grid, counts };
+  }, [records]);
+
+  if (records.length < 5) return null;
+
+  const maxCost = Math.max(...heatmap.grid.flat(), 0.001);
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  return (
+    <div style={{ background: C.bg2, borderRadius: 10, padding: "16px 18px",
+      border: `1px solid ${C.border}`, marginBottom: 16 }}>
+      <div style={{ fontSize: 10, color: C.textMuted, letterSpacing: "0.07em",
+        textTransform: "uppercase", fontFamily: "monospace", marginBottom: 12 }}>
+        Cost by Time of Day
+      </div>
+
+      {/* Hour labels */}
+      <div style={{ display: "flex", marginLeft: 32, marginBottom: 2 }}>
+        {Array.from({ length: 24 }, (_, h) => (
+          <div key={h} style={{
+            flex: 1, fontSize: 7, color: C.textMuted, textAlign: "center",
+            fontFamily: "monospace",
+          }}>
+            {h % 6 === 0 ? h : ""}
+          </div>
+        ))}
+      </div>
+
+      {/* Grid */}
+      {days.map((day, dow) => (
+        <div key={dow} style={{ display: "flex", alignItems: "center", marginBottom: 1 }}>
+          <span style={{
+            width: 28, fontSize: 8, color: C.textMuted, fontFamily: "monospace",
+            textAlign: "right", marginRight: 4,
+          }}>
+            {day}
+          </span>
+          <div style={{ display: "flex", flex: 1, gap: 1 }}>
+            {Array.from({ length: 24 }, (_, hour) => {
+              const cost = heatmap.grid[dow][hour];
+              const intensity = maxCost > 0 ? cost / maxCost : 0;
+              const bg = intensity === 0
+                ? C.bg3
+                : `rgba(74, 222, 128, ${0.15 + intensity * 0.75})`;
+              return (
+                <div key={hour}
+                  title={`${day} ${hour}:00 — ${fmtCost(cost)} (${heatmap.counts[dow][hour]} sessions)`}
+                  style={{
+                    flex: 1, height: 12, borderRadius: 2,
+                    background: bg, cursor: "default",
+                  }}
+                />
+              );
+            })}
+          </div>
+        </div>
+      ))}
+
+      <div style={{
+        display: "flex", justifyContent: "space-between", marginTop: 8,
+        fontSize: 9, color: C.textMuted,
+      }}>
+        <span>Darker = higher cost</span>
+        <span>Hover cells for details</span>
+      </div>
+    </div>
+  );
+}
+
 // ── Main view ─────────────────────────────────────────────────────────────────
 
 export default function Metrics({ sessions }) {
@@ -849,6 +994,10 @@ export default function Metrics({ sessions }) {
 
           {/* Cost trend */}
           <CostTrend records={costRecords} />
+
+          {/* Budget forecasting */}
+          <CostProjection records={costRecords} />
+          <CostByHour records={costRecords} />
 
           {/* Token breakdown */}
           <TokenBreakdown records={costRecords} />
