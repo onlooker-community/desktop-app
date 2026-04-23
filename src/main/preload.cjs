@@ -26,6 +26,7 @@ const IPC = {
   HEATMAP_QUERY:     "heatmap:query",
   DEAD_ENDS_QUERY:   "dead-ends:query",
   INSTRUCTION_GRAPH_QUERY: "instruction-graph:query",
+  HANDOFF_QUALITY_QUERY:   "handoff-quality:query",
   WATCH_INSTRUCTIONS:      "watch:instructions",
   WATCH_INSTRUCTIONS_EVENT:"watch:instructions-event",
   WATCH_INSTRUCTIONS_STOP: "watch:instructions-stop",
@@ -97,6 +98,10 @@ contextBridge.exposeInMainWorld("onlooker", {
 
   instructionGraph: {
     query: () => ipcRenderer.invoke(IPC.INSTRUCTION_GRAPH_QUERY),
+  },
+
+  handoffQuality: {
+    query: () => ipcRenderer.invoke(IPC.HANDOFF_QUALITY_QUERY),
   },
 
   watchInstructions: {

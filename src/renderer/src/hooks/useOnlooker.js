@@ -489,6 +489,25 @@ export function useDeadEnds() {
   return { records, loading };
 }
 
+// ── useHandoffQuality ────────────────────────────────────────────────────────
+// Reads handoff quality scores from the HANDOFF_QUALITY_QUERY IPC channel.
+export function useHandoffQuality() {
+  const [handoffs, setHandoffs] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    ipc.handoffQuality.query().then((data) => {
+      setHandoffs(data ?? []);
+      setLoading(false);
+    }).catch(() => {
+      setHandoffs([]);
+      setLoading(false);
+    });
+  }, []);
+
+  return { handoffs, loading };
+}
+
 // ── useInstructionGraph ──────────────────────────────────────────────────────
 // Reads instruction graph data from Cartographer audit + instruction files.
 export function useInstructionGraph() {

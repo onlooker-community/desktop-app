@@ -558,6 +558,127 @@ async function queryDeadEnds(logDir, { from, to } = {}) {
   return deduped.sort((a, b) => new Date(b.ts) - new Date(a.ts));
 }
 
+// Query handoff quality by comparing Relay handoff docs with next-session Archivist data.
+// Returns [{handoff_ts, cwd, score, resolved, persisted, reintroduced, next_session_id}]
+async function queryHandoffQuality(logDir) {
+  const resolved = resolveDir(logDir);
+  const results = [];
+
+  // Find Relay handoff files
+  const allFiles = collectJsonlFiles(resolved);
+  const relayFiles = allFiles.filter((f) => /relay[/\\]/.test(f) && !isExcludedFile(f));
+  const archivistFiles = allFiles.filter((f) => /archivist[/\\]/.test(f) && !isExcludedFile(f));
+
+  // Parse relay handoff events
+  const handoffs = [];
+  for (const file of relayFiles) {
+    await new Promise((resolve) => {
+      const stream = fs.createReadStream(file, { encoding: "utf8" });
+      const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+      rl.on("line", (line) => {
+        try {
+          const raw = JSON.parse(line.trim());
+          // Look for handoff-capture events
+          if (raw.payload?.blocking_questions || raw.blocking_questions ||
+              raw.type === "handoff-capture" || raw.event_type === "handoff-capture") {
+            const ts = raw.ts ?? raw.timestamp;
+            handoffs.push({
+              ts,
+              cwd: raw.cwd ?? raw.payload?.cwd ?? null,
+              session_id: raw.session_id ?? raw.session ?? "",
+              blocking_questions: raw.payload?.blocking_questions ?? raw.blocking_questions ?? [],
+              open_questions: raw.payload?.open_questions ?? raw.open_questions ?? [],
+              next_action: raw.payload?.next_action ?? raw.next_action ?? null,
+            });
+          }
+        } catch { /* skip */ }
+      });
+      rl.on("close", resolve);
+    });
+  }
+
+  // Parse archivist session extracts for open_questions
+  const sessionQuestions = new Map(); // session_id → [questions]
+  for (const file of archivistFiles) {
+    await new Promise((resolve) => {
+      const stream = fs.createReadStream(file, { encoding: "utf8" });
+      const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+      rl.on("line", (line) => {
+        try {
+          const raw = JSON.parse(line.trim());
+          const sid = raw.session_id ?? raw.session ?? "";
+          const questions = raw.payload?.open_questions ?? raw.open_questions ?? [];
+          if (questions.length > 0 && sid) {
+            if (!sessionQuestions.has(sid)) sessionQuestions.set(sid, []);
+            sessionQuestions.get(sid).push(...questions);
+          }
+        } catch { /* skip */ }
+      });
+      rl.on("close", resolve);
+    });
+  }
+
+  // Sort handoffs by time and score each one
+  handoffs.sort((a, b) => new Date(a.ts) - new Date(b.ts));
+
+  for (let i = 0; i < handoffs.length; i++) {
+    const h = handoffs[i];
+    const nextHandoff = handoffs[i + 1];
+    const allQuestions = [...(h.blocking_questions ?? []), ...(h.open_questions ?? [])];
+
+    if (allQuestions.length === 0) {
+      results.push({
+        handoff_ts: h.ts,
+        cwd: h.cwd,
+        session_id: h.session_id,
+        score: 100,
+        total_questions: 0,
+        resolved: 0,
+        persisted: 0,
+        reintroduced: 0,
+        next_session_id: nextHandoff?.session_id ?? null,
+      });
+      continue;
+    }
+
+    // Check if questions from this handoff appear in the next session's archivist data
+    const nextSid = nextHandoff?.session_id;
+    const nextQuestions = nextSid ? (sessionQuestions.get(nextSid) ?? []) : [];
+    const nextQuestionsLower = nextQuestions.map((q) =>
+      (typeof q === "string" ? q : q.question ?? q.description ?? "").toLowerCase()
+    );
+
+    let resolved = 0;
+    let persisted = 0;
+    for (const q of allQuestions) {
+      const qText = (typeof q === "string" ? q : q.question ?? q.description ?? "").toLowerCase();
+      // Fuzzy match: check if any next-session question contains similar words
+      const reappears = nextQuestionsLower.some((nq) => {
+        const words = qText.split(/\s+/).filter((w) => w.length > 3);
+        return words.length > 0 && words.filter((w) => nq.includes(w)).length >= words.length * 0.5;
+      });
+      if (reappears) persisted++;
+      else resolved++;
+    }
+
+    const score = Math.round((resolved / allQuestions.length) * 100);
+
+    results.push({
+      handoff_ts: h.ts,
+      cwd: h.cwd,
+      session_id: h.session_id,
+      score,
+      total_questions: allQuestions.length,
+      resolved,
+      persisted,
+      reintroduced: 0,
+      next_session_id: nextSid ?? null,
+    });
+  }
+
+  return results.sort((a, b) => new Date(b.handoff_ts) - new Date(a.handoff_ts));
+}
+
 // Build an instruction graph from Cartographer audit data and instruction files.
 // Returns { nodes: [{id, type, label, file, issues}], edges: [{source, target, type}] }
 function queryInstructionGraph(logDir) {
@@ -856,6 +977,10 @@ export function registerLogHandlers(ipcMain, mainWindow, store) {
 
   ipcMain.handle(IPC.DEAD_ENDS_QUERY, (_e, opts) => {
     return queryDeadEnds(store.get("logDir"), opts ?? {});
+  });
+
+  ipcMain.handle(IPC.HANDOFF_QUALITY_QUERY, () => {
+    return queryHandoffQuality(store.get("logDir"));
   });
 
   ipcMain.handle(IPC.INSTRUCTION_GRAPH_QUERY, () => {

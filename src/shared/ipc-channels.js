@@ -34,6 +34,9 @@ export const IPC = {
   // Instruction graph (reads Cartographer audit + parses instruction files)
   INSTRUCTION_GRAPH_QUERY: "instruction-graph:query",
 
+  // Handoff quality (reads Relay handoff + Archivist session data)
+  HANDOFF_QUALITY_QUERY:   "handoff-quality:query",
+
   // File system watcher for instruction files
   WATCH_INSTRUCTIONS:      "watch:instructions",
   WATCH_INSTRUCTIONS_EVENT:"watch:instructions-event",
