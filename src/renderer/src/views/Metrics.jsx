@@ -1023,7 +1023,34 @@ function SignalBreakdown({ sessions: filtered }) {
 
 // ── Plugin Performance components ───────────────────────────────────────────
 
-function computePluginCostShare(events, totalCost) {
+function computePluginCostShare(events, totalCost, costRecords) {
+	// Strategy 1: Use source_plugin from Ledger cost records when available
+	const pluginCosts = {};
+	let attributedCost = 0;
+	if (costRecords?.length) {
+		for (const r of costRecords) {
+			const p = r.source_plugin ?? r.plugin;
+			if (p) {
+				pluginCosts[p] = (pluginCosts[p] ?? 0) + r.estimated_cost_usd;
+				attributedCost += r.estimated_cost_usd;
+			}
+		}
+	}
+
+	// If we have real per-plugin cost data, use it
+	if (attributedCost > 0 && Object.keys(pluginCosts).length > 1) {
+		const effectiveTotal = attributedCost || totalCost;
+		return Object.entries(pluginCosts)
+			.map(([plugin, cost]) => ({
+				plugin,
+				eventCount: events.filter((e) => e.plugin === plugin).length,
+				costShare: cost,
+				percentage: effectiveTotal > 0 ? (cost / effectiveTotal) * 100 : 0,
+			}))
+			.sort((a, b) => b.costShare - a.costShare);
+	}
+
+	// Strategy 2: Estimate from event count proportions (fallback)
 	const counts = {};
 	let total = 0;
 	for (const e of events) {
@@ -1040,6 +1067,115 @@ function computePluginCostShare(events, totalCost) {
 			percentage: (eventCount / total) * 100,
 		}))
 		.sort((a, b) => b.costShare - a.costShare);
+}
+
+// ── PluginCostBreakdown ──────────────────────────────────────────────────────
+// Detailed per-plugin cost attribution: "Tribunal judges cost $X this week"
+
+function PluginCostBreakdown({ costRecords }) {
+	const byPlugin = useMemo(() => {
+		const map = {};
+		for (const r of costRecords) {
+			const p = r.source_plugin ?? r.plugin ?? "session";
+			if (!map[p]) map[p] = { cost: 0, turns: 0, tokens: 0 };
+			map[p].cost += r.estimated_cost_usd;
+			map[p].turns += 1;
+			map[p].tokens += (r.input_tokens ?? 0) + (r.output_tokens ?? 0);
+		}
+		return Object.entries(map)
+			.sort(([, a], [, b]) => b.cost - a.cost)
+			.map(([plugin, v]) => ({ plugin, ...v }));
+	}, [costRecords]);
+
+	if (byPlugin.length < 2) return null;
+
+	const maxCost = byPlugin[0]?.cost ?? 0;
+
+	return (
+		<div
+			style={{
+				background: C.bg2,
+				borderRadius: 10,
+				padding: "16px 18px",
+				border: `1px solid ${C.border}`,
+				marginBottom: 16,
+			}}
+		>
+			<div
+				style={{
+					fontSize: 10,
+					color: C.textMuted,
+					letterSpacing: "0.07em",
+					textTransform: "uppercase",
+					fontFamily: "monospace",
+					marginBottom: 14,
+				}}
+			>
+				Cost by Plugin
+			</div>
+			{byPlugin.map(({ plugin, cost, turns }) => {
+				const pct = maxCost > 0 ? (cost / maxCost) * 100 : 0;
+				const color = pluginColor(plugin);
+				return (
+					<div key={plugin} style={{ marginBottom: 9 }}>
+						<div
+							style={{
+								display: "flex",
+								justifyContent: "space-between",
+								alignItems: "center",
+								marginBottom: 3,
+							}}
+						>
+							<div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+								<div
+									style={{
+										width: 8,
+										height: 8,
+										borderRadius: 2,
+										background: color,
+										flexShrink: 0,
+									}}
+								/>
+								<span style={{ fontSize: 10, color: C.textSecondary }}>
+									{plugin}
+								</span>
+								<span
+									style={{
+										fontSize: 9,
+										color: C.textMuted,
+										fontFamily: "monospace",
+									}}
+								>
+									{turns} turn{turns !== 1 ? "s" : ""}
+								</span>
+							</div>
+							<span
+								style={{
+									fontSize: 10,
+									color: C.green,
+									fontFamily: "'JetBrains Mono', monospace",
+									fontWeight: 600,
+								}}
+							>
+								{fmtCost(cost)}
+							</span>
+						</div>
+						<div style={{ height: 3, borderRadius: 2, background: C.bg3 }}>
+							<div
+								style={{
+									width: `${pct}%`,
+									height: "100%",
+									borderRadius: 2,
+									background: color,
+									transition: "width 0.4s ease",
+								}}
+							/>
+						</div>
+					</div>
+				);
+			})}
+		</div>
+	);
 }
 
 function computePluginROI(events, totalCost) {
@@ -1685,6 +1821,9 @@ export default function Metrics({ sessions }) {
 					{/* Token breakdown */}
 					<TokenBreakdown records={costRecords} />
 
+					{/* Per-plugin cost attribution */}
+					<PluginCostBreakdown costRecords={costRecords} />
+
 					{/* Top sessions by cost */}
 					<TopSessionsByCost sessions={costSessions} />
 				</>
@@ -1760,7 +1899,11 @@ export default function Metrics({ sessions }) {
 			{allEvents.length > 0 &&
 				totalCost > 0 &&
 				(() => {
-					const shares = computePluginCostShare(allEvents, totalCost);
+					const shares = computePluginCostShare(
+						allEvents,
+						totalCost,
+						costRecords,
+					);
 					const roi = computePluginROI(allEvents, totalCost);
 
 					return (

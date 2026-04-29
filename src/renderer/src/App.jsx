@@ -162,7 +162,23 @@ export default function App() {
 						{view === "instgraph" && <InstructionGraph />}
 						{view === "diffing" && <PromptDiffing />}
 						{view === "handoffs" && <HandoffQuality />}
-						{view === "review" && <WeeklyReview sessions={sessions} />}
+						{view === "review" && (
+							<WeeklyReview
+								sessions={sessions}
+								onNavigateToSession={(sessionId) => {
+									setView("sessions");
+									// The Sessions view will pick up the selected session from its own state
+									// We pass the intent via a brief timeout to let the view mount first
+									setTimeout(() => {
+										window.dispatchEvent(
+											new CustomEvent("onlooker:select-session", {
+												detail: sessionId,
+											}),
+										);
+									}, 50);
+								}}
+							/>
+						)}
 					</div>
 				)}
 			</div>

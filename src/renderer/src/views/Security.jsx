@@ -602,6 +602,99 @@ function EventLog({ events }) {
 							</span>
 						</div>
 
+						{/* Elevated threat details — always visible below the main row */}
+						{(() => {
+							const threatCategory =
+								e.meta?.threat_category ?? e.meta?.category;
+							const sourceUrl = e.meta?.url ?? e.meta?.source_url;
+							const sourceFile =
+								e.meta?.file ?? e.meta?.source_file ?? e.meta?.target;
+							const reasoning = e.meta?.reasoning ?? e.meta?.decision_reason;
+							const hasElevated = threatCategory || sourceUrl || sourceFile;
+
+							return hasElevated ? (
+								<div
+									style={{
+										display: "flex",
+										gap: 6,
+										flexWrap: "wrap",
+										marginTop: 5,
+										paddingLeft: 14,
+										alignItems: "center",
+									}}
+								>
+									{threatCategory && (
+										<span
+											style={{
+												fontSize: 9,
+												fontFamily: "monospace",
+												fontWeight: 600,
+												color: isBlock ? C.red : C.yellow,
+												padding: "1px 6px",
+												borderRadius: 3,
+												background: isBlock ? `${C.red}12` : `${C.yellow}12`,
+												border: `1px solid ${isBlock ? `${C.red}22` : `${C.yellow}22`}`,
+											}}
+										>
+											{threatCategory}
+										</span>
+									)}
+									{sourceUrl && (
+										<span
+											style={{
+												fontSize: 9,
+												fontFamily: "monospace",
+												color: C.cyan,
+												overflow: "hidden",
+												textOverflow: "ellipsis",
+												whiteSpace: "nowrap",
+												maxWidth: 300,
+											}}
+											title={sourceUrl}
+										>
+											{sourceUrl}
+										</span>
+									)}
+									{sourceFile && !sourceUrl && (
+										<span
+											style={{
+												fontSize: 9,
+												fontFamily: "monospace",
+												color: C.cyan,
+												overflow: "hidden",
+												textOverflow: "ellipsis",
+												whiteSpace: "nowrap",
+												maxWidth: 300,
+											}}
+											title={sourceFile}
+										>
+											{sourceFile.length > 50
+												? `…${sourceFile.slice(-47)}`
+												: sourceFile}
+										</span>
+									)}
+									{reasoning && (
+										<span
+											style={{
+												fontSize: 9,
+												color: C.textMuted,
+												fontStyle: "italic",
+												overflow: "hidden",
+												textOverflow: "ellipsis",
+												whiteSpace: "nowrap",
+												flex: 1,
+												minWidth: 0,
+											}}
+										>
+											{reasoning.length > 80
+												? `${reasoning.slice(0, 77)}…`
+												: reasoning}
+										</span>
+									)}
+								</div>
+							) : null;
+						})()}
+
 						{isOpen && (
 							<div
 								style={{

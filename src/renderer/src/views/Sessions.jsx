@@ -1,7 +1,7 @@
 // Sessions view — browsable history of all past sessions.
 // Two-panel: session list on left, session detail on right.
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import TurnCard from "../components/TurnCard.jsx";
 import { groupIntoTurns } from "../hooks/useOnlooker.js";
 import { PLUGIN_COLORS, PLUGIN_LABELS, STATUS_COLORS } from "../plugins.js";
@@ -689,6 +689,17 @@ function SessionDetail({ session }) {
 export default function Sessions({ sessions, loading }) {
 	const [selected, setSelected] = useState(null);
 	const [search, setSearch] = useState("");
+
+	// Listen for deep-link navigation from other views (e.g., WeeklyReview)
+	useEffect(() => {
+		const handler = (e) => {
+			if (e.detail && sessions.some((s) => s.id === e.detail)) {
+				setSelected(e.detail);
+			}
+		};
+		window.addEventListener("onlooker:select-session", handler);
+		return () => window.removeEventListener("onlooker:select-session", handler);
+	}, [sessions]);
 
 	const filtered = sessions.filter(
 		(s) => !search || s.id?.toLowerCase().includes(search.toLowerCase()),

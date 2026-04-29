@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
 	useInstructionGraph,
+	useInstructionHealth,
 	useInstructionWatcher,
 } from "../hooks/useOnlooker.js";
 
@@ -468,8 +469,215 @@ function ChangesList({ changes }) {
 	);
 }
 
+// ── Structured findings list ─────────────────────────────────────────────────
+// Card-based list of Cartographer audit findings with severity, files, and fix suggestions.
+
+function FindingsList({ health }) {
+	if (!health?.issues?.length) {
+		return (
+			<div
+				style={{
+					background: C.bg2,
+					borderRadius: 10,
+					padding: "32px 20px",
+					border: `1px solid ${C.border}`,
+					textAlign: "center",
+				}}
+			>
+				<div
+					style={{
+						fontSize: 20,
+						marginBottom: 8,
+						color: C.green,
+						opacity: 0.5,
+					}}
+				>
+					✓
+				</div>
+				<div style={{ fontSize: 12, color: C.textSecondary }}>
+					No issues found
+				</div>
+				<div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+					All instruction files are consistent and well-structured.
+				</div>
+			</div>
+		);
+	}
+
+	// Sort: high → medium → low
+	const sevOrder = { high: 0, medium: 1, low: 2 };
+	const sorted = [...health.issues].sort(
+		(a, b) => (sevOrder[a.severity] ?? 3) - (sevOrder[b.severity] ?? 3),
+	);
+
+	return (
+		<div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+			{sorted.map((issue) => (
+				<div
+					key={
+						issue.id ?? `${issue.category}-${issue.description?.slice(0, 20)}`
+					}
+					style={{
+						background: C.bg2,
+						borderRadius: 10,
+						padding: "14px 16px",
+						border: `1px solid ${issue.severity === "high" ? `${C.red}44` : C.border}`,
+					}}
+				>
+					{/* Header: severity + category */}
+					<div
+						style={{
+							display: "flex",
+							alignItems: "center",
+							gap: 8,
+							marginBottom: 8,
+						}}
+					>
+						<span
+							style={{
+								fontSize: 9,
+								fontWeight: 700,
+								fontFamily: "monospace",
+								padding: "2px 6px",
+								borderRadius: 3,
+								color: sevColor(issue.severity),
+								background: `${sevColor(issue.severity)}22`,
+								textTransform: "uppercase",
+							}}
+						>
+							{issue.severity}
+						</span>
+						{issue.category && (
+							<span
+								style={{
+									fontSize: 9,
+									fontFamily: "monospace",
+									color: C.textMuted,
+									padding: "2px 6px",
+									borderRadius: 3,
+									background: C.bg3,
+								}}
+							>
+								{issue.category}
+							</span>
+						)}
+					</div>
+
+					{/* Description */}
+					<div
+						style={{
+							fontSize: 11,
+							color: C.textPrimary,
+							lineHeight: 1.5,
+							marginBottom: 8,
+						}}
+					>
+						{issue.description}
+					</div>
+
+					{/* Affected files */}
+					{issue.files?.length > 0 && (
+						<div style={{ marginBottom: 8 }}>
+							<div
+								style={{
+									fontSize: 9,
+									color: C.textMuted,
+									textTransform: "uppercase",
+									letterSpacing: "0.06em",
+									marginBottom: 4,
+								}}
+							>
+								Affected files
+							</div>
+							<div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+								{issue.files.map((f) => (
+									<span
+										key={f}
+										style={{
+											fontSize: 10,
+											fontFamily: "monospace",
+											color: C.sky,
+											padding: "2px 6px",
+											background: `${C.sky}08`,
+											borderRadius: 3,
+											display: "inline-block",
+										}}
+									>
+										{f}
+									</span>
+								))}
+							</div>
+						</div>
+					)}
+
+					{/* Evidence */}
+					{issue.evidence && (
+						<div style={{ marginBottom: 8 }}>
+							<div
+								style={{
+									fontSize: 9,
+									color: C.textMuted,
+									textTransform: "uppercase",
+									letterSpacing: "0.06em",
+									marginBottom: 4,
+								}}
+							>
+								Evidence
+							</div>
+							<div
+								style={{
+									fontSize: 10,
+									fontFamily: "monospace",
+									color: C.textSecondary,
+									padding: "6px 8px",
+									background: C.bg3,
+									borderRadius: 4,
+									lineHeight: 1.5,
+									whiteSpace: "pre-wrap",
+								}}
+							>
+								{issue.evidence}
+							</div>
+						</div>
+					)}
+
+					{/* Suggested fix */}
+					{issue.suggestion && (
+						<div
+							style={{
+								fontSize: 10,
+								color: C.green,
+								padding: "6px 8px",
+								background: `${C.green}08`,
+								borderRadius: 4,
+								border: `1px solid ${C.green}22`,
+								lineHeight: 1.5,
+							}}
+						>
+							<span
+								style={{
+									fontSize: 9,
+									fontWeight: 700,
+									textTransform: "uppercase",
+									letterSpacing: "0.06em",
+									marginRight: 6,
+								}}
+							>
+								Fix:
+							</span>
+							{issue.suggestion}
+						</div>
+					)}
+				</div>
+			))}
+		</div>
+	);
+}
+
 export default function InstructionGraph() {
 	const { graph, loading } = useInstructionGraph();
+	const health = useInstructionHealth();
+	const [viewMode, setViewMode] = useState("graph"); // "graph" | "findings"
 	const { changes } = useInstructionWatcher(
 		graph?.nodes?.filter((n) => n.type === "file").length > 0
 			? [graph?.nodes?.[0]?.file?.split("/").slice(0, -1).join("/") || "."]
@@ -542,6 +750,42 @@ export default function InstructionGraph() {
 								{totalIssues} issue{totalIssues !== 1 ? "s" : ""}
 							</span>
 						)}
+						{/* View toggle */}
+						<div
+							style={{
+								display: "flex",
+								gap: 2,
+								marginLeft: 8,
+								background: C.bg2,
+								borderRadius: 5,
+								padding: 2,
+								border: `1px solid ${C.border}`,
+							}}
+						>
+							{[
+								{ id: "graph", label: "Graph" },
+								{ id: "findings", label: "Findings" },
+							].map((v) => (
+								<button
+									key={v.id}
+									type="button"
+									onClick={() => setViewMode(v.id)}
+									style={{
+										fontSize: 9,
+										padding: "3px 10px",
+										borderRadius: 4,
+										cursor: "pointer",
+										border: "none",
+										background: viewMode === v.id ? C.bg3 : "transparent",
+										color: viewMode === v.id ? C.textPrimary : C.textMuted,
+										fontFamily: "inherit",
+										transition: "all 0.15s",
+									}}
+								>
+									{v.label}
+								</button>
+							))}
+						</div>
 					</div>
 				)}
 			</div>
@@ -577,79 +821,147 @@ export default function InstructionGraph() {
 				</div>
 			) : (
 				<>
-					{/* Legend */}
-					<div
-						style={{
-							display: "flex",
-							gap: 16,
-							marginBottom: 14,
-							fontSize: 9,
-							color: C.textMuted,
-							padding: "6px 10px",
-							background: C.bg2,
-							borderRadius: 6,
-							border: `1px solid ${C.border}`,
-						}}
-					>
-						<span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-							<svg width="12" height="12">
-								<title>File node</title>
-								<circle
-									cx="6"
-									cy="6"
-									r="5"
-									fill={`${C.sky}33`}
-									stroke={C.sky}
-								/>
-							</svg>
-							File
-						</span>
-						<span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-							<svg width="12" height="12">
-								<title>Issue node</title>
-								<circle
-									cx="6"
-									cy="6"
-									r="4"
-									fill={`${C.red}33`}
-									stroke={C.red}
-								/>
-							</svg>
-							Issue
-						</span>
-						<span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-							<svg width="20" height="12">
-								<title>Contradiction edge</title>
-								<line
-									x1="0"
-									y1="6"
-									x2="20"
-									y2="6"
-									stroke={C.red}
-									strokeWidth="2"
-								/>
-							</svg>
-							Contradiction
-						</span>
-						<span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-							<svg width="20" height="12">
-								<title>Reference edge</title>
-								<line
-									x1="0"
-									y1="6"
-									x2="20"
-									y2="6"
-									stroke={C.textMuted}
-									strokeDasharray="4,3"
-								/>
-							</svg>
-							Reference
-						</span>
-						<span style={{ marginLeft: "auto" }}>Click nodes for details</span>
-					</div>
+					{viewMode === "graph" ? (
+						<>
+							{/* Legend */}
+							<div
+								style={{
+									display: "flex",
+									gap: 16,
+									marginBottom: 14,
+									fontSize: 9,
+									color: C.textMuted,
+									padding: "6px 10px",
+									background: C.bg2,
+									borderRadius: 6,
+									border: `1px solid ${C.border}`,
+								}}
+							>
+								<span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+									<svg width="12" height="12">
+										<title>File node</title>
+										<circle
+											cx="6"
+											cy="6"
+											r="5"
+											fill={`${C.sky}33`}
+											stroke={C.sky}
+										/>
+									</svg>
+									File
+								</span>
+								<span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+									<svg width="12" height="12">
+										<title>Issue node</title>
+										<circle
+											cx="6"
+											cy="6"
+											r="4"
+											fill={`${C.red}33`}
+											stroke={C.red}
+										/>
+									</svg>
+									Issue
+								</span>
+								<span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+									<svg width="20" height="12">
+										<title>Contradiction edge</title>
+										<line
+											x1="0"
+											y1="6"
+											x2="20"
+											y2="6"
+											stroke={C.red}
+											strokeWidth="2"
+										/>
+									</svg>
+									Contradiction
+								</span>
+								<span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+									<svg width="20" height="12">
+										<title>Reference edge</title>
+										<line
+											x1="0"
+											y1="6"
+											x2="20"
+											y2="6"
+											stroke={C.textMuted}
+											strokeDasharray="4,3"
+										/>
+									</svg>
+									Reference
+								</span>
+								<span style={{ marginLeft: "auto" }}>
+									Click nodes for details
+								</span>
+							</div>
 
-					<GraphView graph={graph} />
-					<ChangesList changes={changes} />
+							<GraphView graph={graph} />
+						</>
+					) : (
+						<>
+							{/* Issue summary cards */}
+							{graph?.issue_count && (
+								<div
+									style={{
+										display: "flex",
+										gap: 10,
+										marginBottom: 16,
+									}}
+								>
+									{[
+										{
+											label: "High",
+											count: graph.issue_count.high ?? 0,
+											color: C.red,
+										},
+										{
+											label: "Medium",
+											count: graph.issue_count.medium ?? 0,
+											color: C.yellow,
+										},
+										{
+											label: "Low",
+											count: graph.issue_count.low ?? 0,
+											color: C.textMuted,
+										},
+									].map((s) => (
+										<div
+											key={s.label}
+											style={{
+												flex: 1,
+												background: C.bg2,
+												borderRadius: 10,
+												padding: "12px 14px",
+												border: `1px solid ${C.border}`,
+											}}
+										>
+											<div
+												style={{
+													fontSize: 20,
+													fontWeight: 700,
+													color: s.count > 0 ? s.color : C.textMuted,
+													fontFamily: "'JetBrains Mono', monospace",
+													lineHeight: 1,
+													marginBottom: 3,
+												}}
+											>
+												{s.count}
+											</div>
+											<div style={{ fontSize: 10, color: C.textSecondary }}>
+												{s.label} severity
+											</div>
+										</div>
+									))}
+								</div>
+							)}
+							<FindingsList health={health} />
+						</>
+					)}
+
+					<div style={{ marginTop: 16 }}>
+						<ChangesList changes={changes} />
+					</div>
 				</>
 			)}
 		</div>

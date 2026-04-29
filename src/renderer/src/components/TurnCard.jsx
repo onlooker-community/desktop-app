@@ -171,6 +171,304 @@ function MiniEvent({ event }) {
 	return <div style={{ padding: "3px 0" }}>{inner}</div>;
 }
 
+// Structured outcome rendering per tool type — replaces raw JSON for common tools.
+function ToolOutcomeDetail({ toolName, events }) {
+	// Find the PostToolUse or tool_outcome event with the richest data
+	const outcomeEvent = events.find((e) => e.type === "tool_outcome");
+	const postEvent = events.find(
+		(e) => e.hook_type === "PostToolUse" || e.type === "PostToolUse",
+	);
+	const meta = outcomeEvent?.meta ?? postEvent?.meta ?? {};
+	const name = toolName?.toLowerCase();
+
+	if (name === "bash") {
+		const exitCode = meta.exit_code ?? meta.exitCode;
+		const stdout = meta.stdout ?? meta.output ?? meta.output_summary;
+		const stderr = meta.stderr;
+		const command = meta.command ?? meta.input?.command;
+		return (
+			<div style={{ padding: "6px 0 2px 16px" }}>
+				{command && (
+					<div
+						style={{
+							fontSize: 9,
+							fontFamily: "monospace",
+							color: C.cyan,
+							marginBottom: 4,
+							padding: "3px 6px",
+							background: C.bg0,
+							borderRadius: 3,
+							overflow: "hidden",
+							textOverflow: "ellipsis",
+							whiteSpace: "nowrap",
+						}}
+					>
+						$ {command}
+					</div>
+				)}
+				<div
+					style={{
+						display: "flex",
+						gap: 8,
+						alignItems: "center",
+						marginBottom: 3,
+					}}
+				>
+					{exitCode != null && (
+						<span
+							style={{
+								fontSize: 9,
+								fontWeight: 700,
+								fontFamily: "monospace",
+								padding: "1px 5px",
+								borderRadius: 3,
+								color: exitCode === 0 ? C.green : C.red,
+								background: exitCode === 0 ? `${C.green}15` : `${C.red}15`,
+								border: `1px solid ${exitCode === 0 ? `${C.green}33` : `${C.red}33`}`,
+							}}
+						>
+							exit {exitCode}
+						</span>
+					)}
+				</div>
+				{stderr && (
+					<pre
+						style={{
+							fontSize: 9,
+							fontFamily: "monospace",
+							color: C.red,
+							margin: "2px 0",
+							padding: "3px 6px",
+							background: `${C.red}08`,
+							borderRadius: 3,
+							whiteSpace: "pre-wrap",
+							wordBreak: "break-all",
+							maxHeight: 80,
+							overflow: "auto",
+						}}
+					>
+						{stderr.length > 300 ? `${stderr.slice(0, 300)}…` : stderr}
+					</pre>
+				)}
+				{stdout && (
+					<pre
+						style={{
+							fontSize: 9,
+							fontFamily: "monospace",
+							color: C.textMuted,
+							margin: "2px 0",
+							padding: "3px 6px",
+							background: C.bg0,
+							borderRadius: 3,
+							whiteSpace: "pre-wrap",
+							wordBreak: "break-all",
+							maxHeight: 80,
+							overflow: "auto",
+						}}
+					>
+						{stdout.length > 300 ? `${stdout.slice(0, 300)}…` : stdout}
+					</pre>
+				)}
+			</div>
+		);
+	}
+
+	if (name === "read") {
+		const filePath = meta.target ?? meta.file_path ?? meta.path;
+		const lineCount = meta.line_count ?? meta.lines;
+		const bytes = meta.bytes ?? meta.size;
+		return (
+			<div
+				style={{
+					padding: "4px 0 2px 16px",
+					display: "flex",
+					gap: 8,
+					alignItems: "center",
+					flexWrap: "wrap",
+				}}
+			>
+				{filePath && (
+					<span style={{ fontSize: 9, fontFamily: "monospace", color: C.cyan }}>
+						{filePath.length > 60 ? `…${filePath.slice(-57)}` : filePath}
+					</span>
+				)}
+				{lineCount != null && (
+					<span
+						style={{ fontSize: 9, fontFamily: "monospace", color: C.textMuted }}
+					>
+						{lineCount} lines
+					</span>
+				)}
+				{bytes != null && (
+					<span
+						style={{ fontSize: 9, fontFamily: "monospace", color: C.textMuted }}
+					>
+						{bytes > 1024 ? `${(bytes / 1024).toFixed(1)}KB` : `${bytes}B`}
+					</span>
+				)}
+			</div>
+		);
+	}
+
+	if (name === "write" || name === "edit") {
+		const filePath = meta.target ?? meta.file_path ?? meta.path;
+		const linesAdded = meta.lines_added ?? meta.added;
+		const linesRemoved = meta.lines_removed ?? meta.removed;
+		const diffSummary = meta.diff_summary ?? meta.output_summary;
+		return (
+			<div style={{ padding: "4px 0 2px 16px" }}>
+				<div
+					style={{
+						display: "flex",
+						gap: 8,
+						alignItems: "center",
+						flexWrap: "wrap",
+					}}
+				>
+					{filePath && (
+						<span
+							style={{ fontSize: 9, fontFamily: "monospace", color: C.cyan }}
+						>
+							{filePath.length > 60 ? `…${filePath.slice(-57)}` : filePath}
+						</span>
+					)}
+					{linesAdded != null && (
+						<span
+							style={{ fontSize: 9, fontFamily: "monospace", color: C.green }}
+						>
+							+{linesAdded}
+						</span>
+					)}
+					{linesRemoved != null && (
+						<span
+							style={{ fontSize: 9, fontFamily: "monospace", color: C.red }}
+						>
+							-{linesRemoved}
+						</span>
+					)}
+				</div>
+				{diffSummary && (
+					<div
+						style={{
+							fontSize: 9,
+							fontFamily: "monospace",
+							color: C.textMuted,
+							marginTop: 3,
+							padding: "3px 6px",
+							background: C.bg0,
+							borderRadius: 3,
+							whiteSpace: "pre-wrap",
+							maxHeight: 60,
+							overflow: "auto",
+						}}
+					>
+						{diffSummary.length > 200
+							? `${diffSummary.slice(0, 200)}…`
+							: diffSummary}
+					</div>
+				)}
+			</div>
+		);
+	}
+
+	if (name === "webfetch") {
+		const url = meta.url ?? meta.target;
+		const statusCode = meta.status_code ?? meta.status ?? meta.http_status;
+		const contentType = meta.content_type;
+		const bytes = meta.bytes ?? meta.response_size;
+		return (
+			<div
+				style={{
+					padding: "4px 0 2px 16px",
+					display: "flex",
+					gap: 8,
+					alignItems: "center",
+					flexWrap: "wrap",
+				}}
+			>
+				{statusCode != null && (
+					<span
+						style={{
+							fontSize: 9,
+							fontWeight: 700,
+							fontFamily: "monospace",
+							padding: "1px 5px",
+							borderRadius: 3,
+							color: statusCode < 400 ? C.green : C.red,
+							background: statusCode < 400 ? `${C.green}15` : `${C.red}15`,
+						}}
+					>
+						{statusCode}
+					</span>
+				)}
+				{url && (
+					<span
+						style={{
+							fontSize: 9,
+							fontFamily: "monospace",
+							color: C.cyan,
+							overflow: "hidden",
+							textOverflow: "ellipsis",
+							whiteSpace: "nowrap",
+							maxWidth: 300,
+						}}
+					>
+						{url}
+					</span>
+				)}
+				{contentType && (
+					<span
+						style={{ fontSize: 9, fontFamily: "monospace", color: C.textMuted }}
+					>
+						{contentType}
+					</span>
+				)}
+				{bytes != null && (
+					<span
+						style={{ fontSize: 9, fontFamily: "monospace", color: C.textMuted }}
+					>
+						{bytes > 1024 ? `${(bytes / 1024).toFixed(1)}KB` : `${bytes}B`}
+					</span>
+				)}
+			</div>
+		);
+	}
+
+	if (name === "grep" || name === "glob") {
+		const pattern = meta.pattern ?? meta.query;
+		const matchCount = meta.match_count ?? meta.matches ?? meta.count;
+		return (
+			<div
+				style={{
+					padding: "4px 0 2px 16px",
+					display: "flex",
+					gap: 8,
+					alignItems: "center",
+					flexWrap: "wrap",
+				}}
+			>
+				{pattern && (
+					<span
+						style={{ fontSize: 9, fontFamily: "monospace", color: C.purple }}
+					>
+						/{pattern}/
+					</span>
+				)}
+				{matchCount != null && (
+					<span
+						style={{ fontSize: 9, fontFamily: "monospace", color: C.textMuted }}
+					>
+						{matchCount} match{matchCount !== 1 ? "es" : ""}
+					</span>
+				)}
+			</div>
+		);
+	}
+
+	// Fallback: no structured rendering available
+	return null;
+}
+
 function ToolCallGroup({ toolCall, defaultExpanded }) {
 	const [expanded, setExpanded] = useState(defaultExpanded ?? false);
 
@@ -307,6 +605,12 @@ function ToolCallGroup({ toolCall, defaultExpanded }) {
 
 			{expanded && (
 				<div style={{ paddingLeft: 4 }}>
+					{/* Structured outcome for common tools */}
+					<ToolOutcomeDetail
+						toolName={toolCall.toolName}
+						events={toolCall.events}
+					/>
+					{/* Individual plugin events (oracle, tribunal, warden, etc.) */}
 					{toolCall.events.map((e) => (
 						<MiniEvent key={`${e.ts}-${e.plugin}-${e.type}`} event={e} />
 					))}
@@ -318,6 +622,24 @@ function ToolCallGroup({ toolCall, defaultExpanded }) {
 
 export default function TurnCard({ turn, defaultExpanded = false }) {
 	const [expanded, setExpanded] = useState(defaultExpanded);
+
+	// Extract user prompt preview from UserPromptSubmit event
+	const promptPreview = (() => {
+		const promptEvent = turn.events.find(
+			(e) =>
+				e.hook_type === "UserPromptSubmit" ||
+				e.type === "UserPromptSubmit" ||
+				(e.plugin === "core/onlooker" && e.label?.startsWith("User prompt")),
+		);
+		const text =
+			promptEvent?.meta?.message ??
+			promptEvent?.meta?.prompt_text ??
+			promptEvent?.detail ??
+			null;
+		if (!text) return null;
+		const cleaned = text.replace(/\s+/g, " ").trim();
+		return cleaned.length > 60 ? `${cleaned.slice(0, 57)}…` : cleaned;
+	})();
 
 	const borderColor = turn.inProgress
 		? C.green
@@ -394,6 +716,24 @@ export default function TurnCard({ turn, defaultExpanded = false }) {
 					T{turn.turn}
 				</span>
 
+				{/* User prompt preview */}
+				{promptPreview && (
+					<span
+						style={{
+							fontSize: 10,
+							color: C.textSecondary,
+							flex: 1,
+							minWidth: 0,
+							overflow: "hidden",
+							textOverflow: "ellipsis",
+							whiteSpace: "nowrap",
+							fontStyle: "italic",
+						}}
+					>
+						{promptPreview}
+					</span>
+				)}
+
 				{/* In-progress indicator */}
 				{turn.inProgress && (
 					<span
@@ -431,7 +771,7 @@ export default function TurnCard({ turn, defaultExpanded = false }) {
 					</span>
 				)}
 
-				<div style={{ flex: 1 }} />
+				{!promptPreview && <div style={{ flex: 1 }} />}
 
 				{/* Duration */}
 				<span

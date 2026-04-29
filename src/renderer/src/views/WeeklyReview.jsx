@@ -209,7 +209,270 @@ function generateNarrative(sessions, avgScore, totalBlocks, _totalWarns) {
 	return narrative;
 }
 
-export default function WeeklyReview({ sessions }) {
+// ── Counsel layer-attributed brief ──────────────────────────────────────────
+// Renders Counsel synthesis as expandable sections per cognitive layer.
+
+const COUNSEL_LAYERS = [
+	{
+		key: "belief_tracking",
+		label: "Belief Tracking",
+		icon: "◎",
+		color: "#818cf8",
+		desc: "How well the agent tracked what is true vs. assumed",
+	},
+	{
+		key: "planning",
+		label: "Planning",
+		icon: "◇",
+		color: "#22d3ee",
+		desc: "Quality of task decomposition and approach selection",
+	},
+	{
+		key: "reflection",
+		label: "Reflection",
+		icon: "◈",
+		color: "#fbbf24",
+		desc: "Self-correction, dead-end recognition, and learning signals",
+	},
+	{
+		key: "llm_revision",
+		label: "LLM Revision",
+		icon: "◆",
+		color: "#f472b6",
+		desc: "Instruction file quality and update effectiveness",
+	},
+];
+
+function CounselBrief({ brief }) {
+	const [expandedLayer, setExpandedLayer] = useState(null);
+
+	if (!brief || typeof brief !== "object") return null;
+
+	// Accept both flat object with layer keys and nested { layers: {...} }
+	const layers = brief.layers ?? brief;
+	const hasLayers = COUNSEL_LAYERS.some((l) => layers[l.key]);
+
+	if (!hasLayers) return null;
+
+	return (
+		<div style={{ marginBottom: 24 }}>
+			<div
+				style={{
+					fontSize: 10,
+					color: C.textMuted,
+					letterSpacing: "0.06em",
+					textTransform: "uppercase",
+					fontFamily: "monospace",
+					marginBottom: 10,
+				}}
+			>
+				Counsel Brief
+			</div>
+			<div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+				{COUNSEL_LAYERS.map((layer) => {
+					const data = layers[layer.key];
+					if (!data) return null;
+					const isOpen = expandedLayer === layer.key;
+					const findings =
+						data.findings ??
+						data.items ??
+						(typeof data === "string" ? [data] : []);
+					const plugins = data.plugins ?? data.attributed_plugins ?? [];
+					const sessions = data.sessions ?? data.source_sessions ?? [];
+
+					return (
+						<div
+							key={layer.key}
+							style={{
+								background: C.bg2,
+								borderRadius: 8,
+								border: `1px solid ${isOpen ? `${layer.color}44` : C.border}`,
+								overflow: "hidden",
+								transition: "border-color 0.15s",
+							}}
+						>
+							<button
+								type="button"
+								onClick={() => setExpandedLayer(isOpen ? null : layer.key)}
+								style={{
+									display: "flex",
+									alignItems: "center",
+									gap: 10,
+									padding: "10px 14px",
+									width: "100%",
+									textAlign: "left",
+									cursor: "pointer",
+									background: isOpen ? `${layer.color}08` : "transparent",
+									border: "none",
+									font: "inherit",
+									color: "inherit",
+									transition: "background 0.15s",
+								}}
+								onMouseEnter={(e) => {
+									if (!isOpen)
+										e.currentTarget.style.background = `${layer.color}06`;
+								}}
+								onMouseLeave={(e) => {
+									if (!isOpen) e.currentTarget.style.background = "transparent";
+								}}
+							>
+								<span style={{ fontSize: 14, color: layer.color }}>
+									{layer.icon}
+								</span>
+								<div style={{ flex: 1, minWidth: 0 }}>
+									<div
+										style={{
+											fontSize: 11,
+											fontWeight: 600,
+											color: C.textPrimary,
+										}}
+									>
+										{layer.label}
+									</div>
+									<div style={{ fontSize: 9, color: C.textMuted }}>
+										{layer.desc}
+									</div>
+								</div>
+								{plugins.length > 0 && (
+									<div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
+										{plugins.slice(0, 3).map((p) => (
+											<span
+												key={p}
+												style={{
+													fontSize: 8,
+													fontFamily: "monospace",
+													padding: "1px 4px",
+													borderRadius: 3,
+													background: C.bg3,
+													color: C.textMuted,
+												}}
+											>
+												{p}
+											</span>
+										))}
+									</div>
+								)}
+								<span style={{ fontSize: 9, color: C.textMuted }}>
+									{isOpen ? "▼" : "▶"}
+								</span>
+							</button>
+
+							{isOpen && findings.length > 0 && (
+								<div
+									style={{
+										padding: "8px 14px 12px",
+										borderTop: `1px solid ${C.border}`,
+									}}
+								>
+									{findings.map((finding, i) => {
+										const text =
+											typeof finding === "string"
+												? finding
+												: (finding.text ??
+													finding.description ??
+													JSON.stringify(finding));
+										const sessionRef =
+											typeof finding === "object"
+												? (finding.session ?? finding.session_id)
+												: null;
+										return (
+											<div
+												key={`${layer.key}-${typeof text === "string" ? text.slice(0, 30) : "f"}-${sessionRef ?? ""}`}
+												style={{
+													fontSize: 11,
+													color: C.textSecondary,
+													lineHeight: 1.6,
+													padding: "4px 0",
+													borderBottom:
+														i < findings.length - 1
+															? `1px solid ${C.border}`
+															: "none",
+													display: "flex",
+													gap: 8,
+													alignItems: "flex-start",
+												}}
+											>
+												<span
+													style={{
+														color: layer.color,
+														flexShrink: 0,
+														marginTop: 2,
+													}}
+												>
+													•
+												</span>
+												<span style={{ flex: 1 }}>{text}</span>
+												{sessionRef && (
+													<span
+														style={{
+															fontSize: 9,
+															fontFamily: "monospace",
+															color: C.cyan,
+															flexShrink: 0,
+															padding: "1px 4px",
+															borderRadius: 3,
+															background: `${C.cyan}11`,
+														}}
+													>
+														{sessionRef.slice(0, 8)}…
+													</span>
+												)}
+											</div>
+										);
+									})}
+
+									{/* Source sessions */}
+									{sessions.length > 0 && (
+										<div
+											style={{
+												marginTop: 8,
+												paddingTop: 8,
+												borderTop: `1px solid ${C.border}`,
+											}}
+										>
+											<div
+												style={{
+													fontSize: 9,
+													color: C.textMuted,
+													marginBottom: 4,
+												}}
+											>
+												Source sessions:
+											</div>
+											<div
+												style={{ display: "flex", gap: 4, flexWrap: "wrap" }}
+											>
+												{sessions.map((sid) => (
+													<span
+														key={sid}
+														style={{
+															fontSize: 9,
+															fontFamily: "monospace",
+															color: C.cyan,
+															padding: "2px 6px",
+															borderRadius: 3,
+															background: `${C.cyan}11`,
+														}}
+													>
+														{typeof sid === "string" && sid.length > 12
+															? `${sid.slice(0, 8)}…`
+															: sid}
+													</span>
+												))}
+											</div>
+										</div>
+									)}
+								</div>
+							)}
+						</div>
+					);
+				})}
+			</div>
+		</div>
+	);
+}
+
+export default function WeeklyReview({ sessions, onNavigateToSession }) {
 	const [counselKeyConnected, _setCounselKeyConnected] = useState(false);
 	const [dismissed, setDismissed] = useState(false);
 
@@ -400,6 +663,25 @@ export default function WeeklyReview({ sessions }) {
 							</div>
 						</div>
 
+						{/* Counsel layer-attributed brief */}
+						{(() => {
+							// Extract Counsel brief data from session events
+							const counselEvents = thisWeek.flatMap((s) =>
+								(s.events ?? []).filter((e) => e.plugin === "counsel"),
+							);
+							// Find the most recent brief (Counsel emits structured briefs)
+							const briefEvent = counselEvents
+								.filter(
+									(e) =>
+										e.meta?.layers ||
+										e.meta?.belief_tracking ||
+										e.meta?.planning,
+								)
+								.sort((a, b) => new Date(b.ts) - new Date(a.ts))[0];
+							const brief = briefEvent?.meta;
+							return brief ? <CounselBrief brief={brief} /> : null;
+						})()}
+
 						{/* Counsel upsell — shown once, dismissible */}
 						{!counselKeyConnected && !dismissed && (
 							<div
@@ -502,8 +784,10 @@ export default function WeeklyReview({ sessions }) {
 									Needs Attention
 								</div>
 								{flaggedSessions.map((s) => (
-									<div
+									<button
 										key={s.id}
+										type="button"
+										onClick={() => onNavigateToSession?.(s.id)}
 										style={{
 											display: "flex",
 											alignItems: "center",
@@ -513,6 +797,19 @@ export default function WeeklyReview({ sessions }) {
 											borderRadius: 6,
 											marginBottom: 6,
 											border: `1px solid ${C.border}`,
+											width: "100%",
+											textAlign: "left",
+											cursor: onNavigateToSession ? "pointer" : "default",
+											font: "inherit",
+											color: "inherit",
+											transition: "border-color 0.15s",
+										}}
+										onMouseEnter={(e) => {
+											if (onNavigateToSession)
+												e.currentTarget.style.borderColor = C.borderAccent;
+										}}
+										onMouseLeave={(e) => {
+											e.currentTarget.style.borderColor = C.border;
 										}}
 									>
 										<span
@@ -528,8 +825,12 @@ export default function WeeklyReview({ sessions }) {
 										<span
 											style={{
 												fontSize: 10,
-												color: C.textMuted,
+												color: onNavigateToSession ? C.cyan : C.textMuted,
 												fontFamily: "monospace",
+												textDecoration: onNavigateToSession
+													? "underline"
+													: "none",
+												textDecorationColor: `${C.cyan}44`,
 											}}
 										>
 											{s.id?.slice(0, 16)}…
@@ -548,7 +849,10 @@ export default function WeeklyReview({ sessions }) {
 												<span style={{ color: C.yellow }}>⚑ {s.warns}</span>
 											)}
 										</span>
-									</div>
+										{onNavigateToSession && (
+											<span style={{ fontSize: 9, color: C.textMuted }}>→</span>
+										)}
+									</button>
 								))}
 							</div>
 						)}
